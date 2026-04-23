@@ -8,6 +8,7 @@ import pandas as pd
 
 # Excel column letter -> 0-based index
 COL = {
+    "C": 2,
     "I": 8, "J": 9,
     "K": 10, "M": 12, "N": 13, "O": 14,
     "P": 15, "Q": 16, "R": 17, "S": 18, "T": 19, "U": 20,
@@ -15,6 +16,7 @@ COL = {
 }
 
 FIELD_MAP = {
+    "C": "driver_id",
     "I": "restaurant_id",
     "J": "restaurant_name",
     "K": "order_id",
@@ -44,9 +46,14 @@ NUMERIC_FIELDS = [
 ]
 
 STRING_FIELDS = [
-    "restaurant_id", "restaurant_name", "order_id", "user_id",
+    "driver_id", "restaurant_id", "restaurant_name", "order_id", "user_id",
     "order_time", "payment_method",
 ]
+
+# Exclude driver IDs — virtual drivers, not real orders, remove entirely
+EXCLUDE_DRIVER_IDS = {"18"}
+# No-delivery driver IDs — real orders but no delivery (e.g. charities, pickup)
+NO_DELIVERY_DRIVER_IDS = {"1", "17"}
 
 
 def _bracket(km: float) -> str:
@@ -133,9 +140,19 @@ def parse_excel(file) -> pd.DataFrame:
     df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
 
     # ==== ENRICHMENT ====
+    # Remove virtual driver orders entirely (driver 18)
+    df = df[~df["driver_id"].isin(EXCLUDE_DRIVER_IDS)].reset_index(drop=True)
+
+    # Delivered = has a real driver and not a no-delivery order (1, 17)
+    df["is_delivered"] = (
+        (df["driver_id"] != "") &
+        (~df["driver_id"].isin(NO_DELIVERY_DRIVER_IDS))
+    ).astype(int)
+
     df["total_paid"] = df["amount_ex_vat"] + df["vat_amount"]
     df["delivery_revenue"] = df["delivery_fee_charged"] * 1.10
-    df["km_billable"] = np.ceil(df["km_delivered"]).astype(int).clip(lower=0)
+    # ROUNDUP(x, 0) — rounds away from zero, matching Excel behavior
+    df["km_billable"] = (np.sign(df["km_delivered"]) * np.ceil(df["km_delivered"].abs())).astype(int).clip(lower=0)
     df["payment_method_clean"] = df["payment_method"].replace("", "Benefits Pay").fillna("Benefits Pay")
     df["is_wallet"] = (df["wallet_paid"] > 0).astype(int)
     df["is_discounted"] = (df["discount_amount"] > 0).astype(int)

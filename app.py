@@ -3,6 +3,9 @@ Finance Team Analytics Dashboard
 Streamlit + Plotly + Pandas, fully in-memory.
 Run: streamlit run app.py
 """
+import base64
+import os as _os
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -56,13 +59,50 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+_logo_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Jahez-Logo-Red-1-scaled.webp")
+
+# ============ PASSWORD GATE ============
+def check_password():
+    if st.session_state.get("authenticated"):
+        return True
+    # Hide sidebar and push content to center
+    st.markdown(
+        """
+    <style>
+        [data-testid="stSidebar"] { display: none; }
+        .block-container { display:flex; justify-content:center; align-items:center; min-height:80vh; }
+    </style>
+    """,
+        unsafe_allow_html=True,
+    )
+    _, col, _ = st.columns([1, 1, 1])
+    with col:
+        if _os.path.exists(_logo_path):
+            with open(_logo_path, "rb") as _f:
+                _b64 = base64.b64encode(_f.read()).decode()
+            st.markdown(
+                f'<div style="text-align:center;"><img src="data:image/webp;base64,{_b64}" style="height:80px; margin-bottom:8px;" /></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown('<h3 style="text-align:center; margin-bottom:4px;">Finance Team Analytics</h3>', unsafe_allow_html=True)
+        st.markdown('<p style="text-align:center; color:#64748b; font-size:13px; margin-bottom:24px;">Enter password to continue</p>', unsafe_allow_html=True)
+        pwd = st.text_input("Password", type="password", placeholder="Enter password...", label_visibility="collapsed")
+        if st.button("Login", type="primary", use_container_width=True):
+            if pwd == "Jahez@123":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+    return False
+
+if not check_password():
+    st.stop()
+
 # ============ SESSION ============
 if "df" not in st.session_state:
     st.session_state.df = None
 
 # ============ HEADER ============
-import base64, os as _os
-_logo_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Jahez-Logo-Red-1-scaled.webp")
 if _os.path.exists(_logo_path):
     with open(_logo_path, "rb") as _f:
         _logo_b64 = base64.b64encode(_f.read()).decode()
@@ -70,10 +110,7 @@ if _os.path.exists(_logo_path):
         f"""
     <div class="main-header">
         <img src="data:image/webp;base64,{_logo_b64}" style="height:40px; object-fit:contain;" />
-        <div>
-            <h1 style="margin:0; font-size:24px;">Finance Team Analytics</h1>
-            <p style="margin:0; color:#64748b; font-size:13px;">Delivery operations & customer analytics · SQLite database · data persists across sessions</p>
-        </div>
+        <h1 style="margin:0; font-size:24px;">Finance Team Analytics</h1>
     </div>
     """,
         unsafe_allow_html=True,
@@ -83,10 +120,7 @@ else:
         """
     <div class="main-header">
         <div class="brand-mark">J</div>
-        <div>
-            <h1 style="margin:0; font-size:24px;">Finance Team Analytics</h1>
-            <p style="margin:0; color:#64748b; font-size:13px;">Delivery operations & customer analytics · SQLite database · data persists across sessions</p>
-        </div>
+        <h1 style="margin:0; font-size:24px;">Finance Team Analytics</h1>
     </div>
     """,
         unsafe_allow_html=True,
@@ -144,7 +178,8 @@ with st.expander("Upload Excel files", expanded=(total_in_db == 0)):
             """
 | Col | Field | | Col | Field |
 |---|---|---|---|---|
-| **I** | Restaurant ID | | **V** | Commission BHD |
+| **C** | Driver ID (empty/1/17/18 = not delivered) | | **V** | Commission BHD |
+| **I** | Restaurant ID | | |
 | **J** | Restaurant Name | | **Z** | Payment Method (blank = Benefits Pay) |
 | **K** | Order ID | | **AB** | Restaurant Delivery Offer |
 | **M** | User ID | | **AC** | Discount % |
@@ -178,15 +213,6 @@ if len(df) == 0:
 
 # ---------- SIDEBAR FILTERS ----------
 with st.sidebar:
-    st.markdown(f"**Database:** `{num(len(df))}` orders")
-    st.caption(f"{num(df['user_id'].nunique())} customers · {num(df['restaurant_display'].nunique())} restaurants")
-
-    if st.button("🗑️ Clear all data", use_container_width=True):
-        clear_all()
-        st.session_state.df = None
-        st.rerun()
-
-    st.markdown("---")
     st.markdown("### Filters")
 
     # Date range — only consider rows with valid dates
@@ -223,6 +249,15 @@ with st.sidebar:
     rest_opts = sorted(df["restaurant_display"].unique().tolist())
     rest_sel = st.multiselect("Restaurants", rest_opts, default=[])
 
+    # Order ID filter
+    order_id_input = st.text_input("Filter by Order ID", "", placeholder="Enter order ID...")
+
+    # User ID filter
+    user_id_input = st.text_input("Filter by User ID", "", placeholder="Enter user ID...")
+
+    # Restaurant ID filter
+    rest_id_input = st.text_input("Filter by Restaurant ID", "", placeholder="Enter restaurant ID...")
+
     # Profitability
     prof_sel = st.radio(
         "Profitability",
@@ -238,6 +273,9 @@ filters = {
     "distance_brackets": bracket_sel,
     "restaurants": rest_sel,
     "only_profitable": prof_filter,
+    "order_id": order_id_input.strip() if order_id_input.strip() else None,
+    "user_id": user_id_input.strip() if user_id_input.strip() else None,
+    "restaurant_id": rest_id_input.strip() if rest_id_input.strip() else None,
 }
 
 filtered = apply_filters(df, filters)
@@ -247,59 +285,66 @@ if len(filtered) == 0:
     st.stop()
 
 # ============ TABS ============
-tab_overview, tab_customers, tab_restaurants, tab_profit, tab_time, tab_pivot, tab_raw = st.tabs(
-    ["📊 Overview", "👥 Customers", "🏪 Restaurants", "💰 Profitability", "🕐 Time Analysis", "🔀 Pivot Builder", "📋 Raw Data"]
+tab_overview, tab_customers, tab_restaurants, tab_profit, tab_time, tab_pivot, tab_raw, tab_ratios = st.tabs(
+    ["📊 Overview", "👥 Customers", "🏪 Restaurants", "💰 Profitability", "🕐 Time Analysis", "🔀 Pivot Builder", "📋 Raw Data", "📐 Ratios"]
 )
 
 # ============ OVERVIEW ============
 with tab_overview:
     kpi = top_line(filtered)
 
-    # Row 1: Core profitability
-    st.markdown("##### Core Profitability")
+    # ── RAW TOTALS ──
+    st.markdown("##### Raw Totals")
     c = st.columns(4)
-    c[0].metric("Total orders", num(kpi["orders"]))
-    c[1].metric("GMV", bhd(kpi["gmv"]))
-    c[2].metric(
-        "Net profit",
-        bhd(kpi["profit"]),
-        delta=f"{pct(kpi['profit_margin_pct'])} margin",
-    )
-    c[3].metric("Loss rate", pct(kpi["loss_rate_pct"]))
+    c[0].metric("Total Orders", num(kpi["orders"]))
+    c[1].metric("Delivered Orders", num(kpi["delivered_orders"]))
+    c[2].metric("GMV", bhd(kpi["gmv"]))
+    c[3].metric("Gross Revenue", bhd(kpi["gross_revenue"]))
 
     c = st.columns(4)
-    c[0].metric("Gross revenue", bhd(kpi["gross_revenue"]))
-    c[1].metric("Take rate", pct(kpi["take_rate_pct"]))
-    c[2].metric("Loss amount", bhd(kpi["loss_amount"]))
-    c[3].metric("Break-even order value", bhd(kpi["breakeven_order_value"]))
+    c[0].metric("Commission", bhd(kpi["commission"]))
+    c[1].metric("Delivery Rev x1.10", bhd(kpi["delivery_rev"]))
+    c[2].metric("Rest Offer", bhd(kpi["rest_offer"]))
+    c[3].metric("3PL Cost", bhd(kpi["cost_3pl"]))
 
-    # Row 2: Unit economics
+    c = st.columns(3)
+    c[0].metric("Total Discount", bhd(kpi["total_discount"]))
+    c[1].metric("Total KM", num(kpi["total_km"]))
+    c[2].metric("Discounted Order %", pct(kpi["discount_order_pct"]))
+
+    st.markdown("---")
+
+    # ── PROFITABILITY KPIs ──
+    st.markdown("##### Profitability")
+    c = st.columns(4)
+    c[0].metric("Net Profit", bhd(kpi["profit"]))
+    c[1].metric("Profit Margin", pct(kpi["profit_margin_pct"]))
+    c[2].metric("Loss Rate", pct(kpi["loss_rate_pct"]))
+    c[3].metric("Loss Amount", bhd(kpi["loss_amount"]))
+
+    st.markdown("---")
+
+    # ── UNIT ECONOMICS (per-order ratios) ──
     st.markdown("##### Unit Economics")
     c = st.columns(4)
     c[0].metric("AOV", bhd(kpi["aov"]))
-    c[1].metric("CPO (3PL)", bhd(kpi["cpo"]))
-    c[2].metric("RPO", bhd(kpi["rpo"]))
-    c[3].metric("RPO - CPO spread", bhd(kpi["rpo_cpo_spread"]))
+    c[1].metric("AOV Profitable", bhd(kpi["aov_profitable"]))
+    c[2].metric("AOV Loss", bhd(kpi["aov_loss"]))
+    c[3].metric("Profit / Order", bhd(kpi["profit_per_order"]))
 
-    c = st.columns(4)
-    c[0].metric("Profit / order", bhd(kpi["profit_per_order"]))
-    c[1].metric("Profit / KM", bhd(kpi["profit_per_km"]))
-    c[2].metric("Delivery fee coverage", pct(kpi["delivery_fee_coverage_pct"]))
-    c[3].metric("Chargeable delivery %", pct(kpi["chargeable_delivery_pct"]))
+    st.markdown("---")
 
-    # Row 3: Revenue streams
-    st.markdown("##### Revenue Streams")
-    c = st.columns(4)
-    c[0].metric("Commission", bhd(kpi["commission"]))
-    c[1].metric("Delivery rev x1.10", bhd(kpi["delivery_rev"]))
-    c[2].metric("Rest offer", bhd(kpi["rest_offer"]))
-    c[3].metric("3PL cost", bhd(kpi["cost_3pl"]))
+    # ── DELIVERY KPIs (delivered orders only) ──
+    st.markdown("##### Delivery KPIs (delivered orders only)")
+    c = st.columns(3)
+    c[0].metric("CPO (3PL)", bhd(kpi["cpo"]))
+    c[1].metric("RPO", bhd(kpi["rpo"]))
+    c[2].metric("RPO - CPO Spread", bhd(kpi["rpo_cpo_spread"]))
 
-    c = st.columns(4)
-    c[0].metric("Total VAT", bhd(kpi["total_vat"]))
-    c[1].metric("Total discount", bhd(kpi["total_discount"]))
-    c[2].metric("Total KM", num(kpi["total_km"]))
-    c[3].metric("Organic order %", pct(kpi["organic_order_pct"]))
+    c = st.columns(3)
+    c[0].metric("CPO Coverage", pct(kpi["cpo_coverage_pct"]))
+    c[1].metric("Chargeable Delivery %", pct(kpi["chargeable_delivery_pct"]))
+    c[2].metric("Take Rate", pct(kpi["take_rate_pct"]))
 
     st.markdown("---")
 
@@ -407,103 +452,101 @@ with tab_overview:
     # Bracket table
     st.markdown("#### Distance bracket detail")
     br_display = br.copy()
-    br_display["Order mix"] = br_display["order_mix_pct"].apply(pct)
-    br_display["GMV"] = br_display["gmv"].apply(bhd)
-    br_display["RPO"] = br_display["rpo"].apply(bhd)
-    br_display["CPO"] = br_display["cpo"].apply(bhd)
-    br_display["Avg profit"] = br_display["avg_profit"].apply(bhd)
-    br_display["Total profit"] = br_display["total_profit"].apply(bhd)
-    br_display["Loss rate"] = br_display["loss_rate"].apply(pct)
+    br_display["Order mix %"] = br_display["order_mix_pct"].round(1).astype(str) + "%"
+    br_display["GMV"] = br_display["gmv"].round(3)
+    br_display["RPO"] = br_display["rpo"].round(3)
+    br_display["CPO"] = br_display["cpo"].round(3)
+    br_display["Avg profit"] = br_display["avg_profit"].round(3)
+    br_display["Total profit"] = br_display["total_profit"].round(3)
+    br_display["Loss rate %"] = br_display["loss_rate"].round(1).astype(str) + "%"
     st.dataframe(
-        br_display[["bracket", "orders", "Order mix", "GMV", "RPO", "CPO", "Avg profit", "Total profit", "Loss rate"]],
+        br_display[["bracket", "orders", "Order mix %", "GMV", "RPO", "CPO", "Avg profit", "Total profit", "Loss rate %"]],
         use_container_width=True,
         hide_index=True,
     )
 
 # ============ CUSTOMERS ============
 with tab_customers:
-    k = customer_kpis(filtered)
+    # Search by User ID
+    user_search = st.text_input("Search by User ID", "", placeholder="Enter user ID...", key="user_search")
+    if user_search.strip():
+        q = user_search.strip().lower()
+        cust_df = filtered[filtered["user_id"].astype(str).str.lower().str.contains(q, na=False)]
+        if len(cust_df) == 0:
+            st.warning(f"No customers match '{user_search}'.")
+            st.stop()
+    else:
+        cust_df = filtered
+
+    k = customer_kpis(cust_df)
 
     c = st.columns(4)
     c[0].metric("Total customers", num(k["total_customers"]))
-    c[1].metric("New customers", num(k["new_customers"]))
-    c[2].metric("Repeat customers", num(k["repeat_customers"]), f"{pct(k['repeat_rate_pct'])} of base")
-    c[3].metric("One-time customers", num(k["one_time_customers"]))
+    c[1].metric("Repeat customers", num(k["repeat_customers"]), f"{pct(k['repeat_rate_pct'])} of base")
+    c[2].metric("One-time customers", num(k["one_time_customers"]))
+    c[3].metric("Orders / customer", f"{k['opc']:.2f}")
 
     c = st.columns(4)
-    c[0].metric("Orders / customer", f"{k['opc']:.2f}")
-    c[1].metric("AOV", bhd(k["aov"]))
-    c[2].metric("Avg lifetime revenue", bhd(k["avg_lt_rev"]))
-    c[3].metric("Avg lifetime profit", bhd(k["avg_lt_profit"]))
+    c[0].metric("AOV", bhd(k["aov"]))
+    c[1].metric("AOV Profitable", bhd(k["aov_profitable"]))
+    c[2].metric("AOV Loss", bhd(k["aov_loss"]))
+    c[3].metric("Profitable customers", pct(k["profitable_customer_pct"]))
 
-    c = st.columns(4)
-    c[0].metric("Profitable customers", pct(k["profitable_customer_pct"]))
-    c[1].metric("Top 20% rev share", pct(k["top20_rev_concentration_pct"]))
-    c[2].metric("Wallet penetration", pct(k["wallet_penetration_pct"]))
-    c[3].metric("Benefits pay %", pct(k["benefits_pay_pct"]))
+    c = st.columns(1)
+    c[0].metric("Discounted Order %", pct(k["discount_penetration_pct"]))
 
-    c = st.columns(4)
-    c[0].metric("Discount penetration", pct(k["discount_penetration_pct"]))
-    c[1].metric("Avg discount / order", bhd(k["avg_discount_bhd"]))
-    c[2].metric("Organic order %", pct(k["organic_order_pct"]))
-    c[3].metric("", "")
-
-    c = st.columns(4)
-    c[0].metric("Dormant 30d+", pct(k["dormant_30_pct"]))
-    c[1].metric("Dormant 60d+", pct(k["dormant_60_pct"]))
-    c[2].metric("Dormant 90d+", pct(k["dormant_90_pct"]))
-    c[3].metric("", "")
+    # --- Payment Method Usage ---
+    pm_mix = k.get("payment_method_mix", {})
+    if pm_mix:
+        pm_sorted = sorted(pm_mix.items(), key=lambda x: x[1], reverse=True)
+        cols_per_row = 4
+        for i in range(0, len(pm_sorted), cols_per_row):
+            batch = pm_sorted[i:i + cols_per_row]
+            c = st.columns(cols_per_row)
+            for j, (method, pct_val) in enumerate(batch):
+                c[j].metric(method, pct(pct_val))
 
     st.markdown("---")
 
-    col_l, col_r = st.columns(2)
-
-    # RFM pie
-    with col_l:
-        st.markdown("#### Customer segments (RFM)")
-        rfm = rfm_segmentation(filtered)
-        if len(rfm) > 0:
-            seg_counts = rfm["segment"].value_counts().reset_index()
-            seg_counts.columns = ["segment", "count"]
-            seg_colors = {
-                "Champions": "#10b981", "Loyal": "#3b82f6", "At Risk": "#f59e0b",
-                "New": "#8b5cf6", "Lost": "#6b7280", "Potential": "#ec4899",
-            }
+    st.markdown("#### Customer Levels")
+    rfm = rfm_segmentation(cust_df)
+    if len(rfm) > 0:
+        col_l, col_r = st.columns(2)
+        level_order = [
+            "Level 1 — VIP", "Level 2 — Loyal", "Level 3 — New",
+            "Level 4 — At Risk", "Level 5 — Potential", "Level 6 — Inactive",
+        ]
+        seg_counts = rfm["segment"].value_counts().reset_index()
+        seg_counts.columns = ["level", "count"]
+        seg_counts["level"] = pd.Categorical(seg_counts["level"], categories=level_order, ordered=True)
+        seg_counts = seg_counts.sort_values("level").reset_index(drop=True)
+        seg_colors = {
+            "Level 1 — VIP": "#10b981",
+            "Level 2 — Loyal": "#3b82f6",
+            "Level 3 — New": "#8b5cf6",
+            "Level 4 — At Risk": "#f59e0b",
+            "Level 5 — Potential": "#ec4899",
+            "Level 6 — Inactive": "#6b7280",
+        }
+        with col_l:
             fig = px.pie(
-                seg_counts, names="segment", values="count",
-                color="segment", color_discrete_map=seg_colors, hole=0.45,
+                seg_counts, names="level", values="count",
+                color="level", color_discrete_map=seg_colors, hole=0.45,
+                category_orders={"level": level_order},
             )
             fig.update_traces(textposition="inside", textinfo="percent+label")
             fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig, use_container_width=True)
 
-    # Pareto
-    with col_r:
-        st.markdown("#### Pareto: revenue concentration")
-        lt = k["lifetimes"].sort_values("revenue", ascending=False).reset_index(drop=True)
-        if len(lt) > 0:
-            total = lt["revenue"].sum()
-            lt["cum_rev_pct"] = lt["revenue"].cumsum() / total * 100 if total else 0
-            lt["cust_pct"] = (lt.index + 1) / len(lt) * 100
+        with col_r:
+            seg_detail = seg_counts.copy()
+            total_cust = seg_detail["count"].sum()
+            seg_detail["% of Customers"] = (seg_detail["count"] / total_cust * 100).round(1).astype(str) + "%"
+            seg_detail.columns = ["Level", "Customers", "% of Customers"]
+            st.dataframe(seg_detail, use_container_width=True, hide_index=True)
 
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=lt["cust_pct"], y=lt["revenue"],
-                marker_color="#C0232A", name="Revenue per customer",
-            ))
-            fig.add_trace(go.Scatter(
-                x=lt["cust_pct"], y=lt["cum_rev_pct"],
-                mode="lines", line=dict(color="#3b82f6", width=2),
-                name="Cumulative %", yaxis="y2",
-            ))
-            fig.update_layout(
-                height=360, margin=dict(l=20, r=20, t=20, b=20),
-                xaxis=dict(title="% of customers"),
-                yaxis=dict(title="Revenue (BHD)"),
-                yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0, 105]),
-                legend=dict(orientation="h", y=1.1),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    # Build user → level lookup for the tables below
+    user_level = rfm.set_index("user_id")["segment"].to_dict() if len(rfm) > 0 else {}
 
     # Top / bottom customers
     st.markdown("---")
@@ -511,19 +554,70 @@ with tab_customers:
 
     lt_all = k["lifetimes"]
     with col_l:
-        st.markdown("#### 🟢 Top 20 by lifetime profit")
+        st.markdown("#### Top 20 by lifetime profit")
         top = lt_all.nlargest(20, "profit")[["user_id", "orders", "revenue", "profit", "aov"]].copy()
-        top["revenue"] = top["revenue"].apply(bhd)
-        top["profit"] = top["profit"].apply(bhd)
-        top["aov"] = top["aov"].apply(bhd)
-        st.dataframe(top, use_container_width=True, hide_index=True)
+        top["Level"] = top["user_id"].map(user_level).fillna("—")
+        top["revenue"] = top["revenue"].round(3)
+        top["profit"] = top["profit"].round(3)
+        top["aov"] = top["aov"].round(3)
+        st.dataframe(top[["user_id", "Level", "orders", "revenue", "profit", "aov"]], use_container_width=True, hide_index=True)
 
     with col_r:
-        st.markdown("#### 🔴 Top 10 loss-making customers")
+        st.markdown("#### Top 10 loss-making customers")
         bot = lt_all.nsmallest(10, "profit")[["user_id", "orders", "avg_km", "profit"]].copy()
+        bot["Level"] = bot["user_id"].map(user_level).fillna("—")
         bot["avg_km"] = bot["avg_km"].round(1)
-        bot["profit"] = bot["profit"].apply(bhd)
-        st.dataframe(bot, use_container_width=True, hide_index=True)
+        bot["profit"] = bot["profit"].round(3)
+        st.dataframe(bot[["user_id", "Level", "orders", "avg_km", "profit"]], use_container_width=True, hide_index=True)
+
+    # --- Full customer list ---
+    st.markdown("---")
+    st.markdown(f"#### All Customers ({num(len(lt_all))})")
+    st.caption("Full customer list with lifetime metrics. Download as CSV for Excel.")
+
+    all_cust = lt_all.copy()
+    all_cust["Level"] = all_cust["user_id"].map(user_level).fillna("—")
+    all_cust["first_order"] = all_cust["first_order"].dt.strftime("%Y-%m-%d").fillna("")
+    all_cust["last_order"] = all_cust["last_order"].dt.strftime("%Y-%m-%d").fillna("")
+    today = pd.Timestamp.today().normalize()
+    all_cust["days_since_last"] = (today - pd.to_datetime(all_cust["last_order"], errors="coerce")).dt.days.fillna(0).astype(int)
+    all_cust["revenue"] = all_cust["revenue"].round(3)
+    all_cust["profit"] = all_cust["profit"].round(3)
+    all_cust["aov"] = all_cust["aov"].round(3)
+    all_cust["commission"] = all_cust["commission"].round(3)
+    all_cust["total_discount"] = all_cust["total_discount"].round(3)
+    all_cust["avg_km"] = all_cust["avg_km"].round(1)
+    _wallet_pct = np.where(all_cust["orders"] > 0, (all_cust["wallet_orders"] / all_cust["orders"] * 100).round(1), 0)
+    all_cust["wallet_pct"] = pd.Series(_wallet_pct, index=all_cust.index).round(1).astype(str) + "%"
+    _discount_pct = np.where(all_cust["orders"] > 0, (all_cust["discounted_orders"] / all_cust["orders"] * 100).round(1), 0)
+    all_cust["discount_pct"] = pd.Series(_discount_pct, index=all_cust.index).round(1).astype(str) + "%"
+    all_cust["profit_per_order"] = np.where(all_cust["orders"] > 0, (all_cust["profit"] / all_cust["orders"]).round(3), 0)
+    all_cust["is_profitable"] = np.where(all_cust["profit"] > 0, "Yes", "No")
+
+    show_cols = [
+        "user_id", "Level", "orders", "revenue", "profit", "profit_per_order",
+        "aov", "commission", "avg_km", "first_order", "last_order",
+        "days_since_last", "wallet_orders", "wallet_pct",
+        "discounted_orders", "discount_pct", "total_discount", "is_profitable",
+    ]
+    col_labels = {
+        "user_id": "User ID", "Level": "Level", "orders": "Orders",
+        "revenue": "GMV", "profit": "Profit", "profit_per_order": "Profit/Order",
+        "aov": "AOV", "commission": "Commission", "avg_km": "Avg KM",
+        "first_order": "First Order", "last_order": "Last Order",
+        "days_since_last": "Days Since Last", "wallet_orders": "Wallet Orders",
+        "wallet_pct": "Wallet %", "discounted_orders": "Discount Orders",
+        "discount_pct": "Discount %", "total_discount": "Total Discount",
+        "is_profitable": "Profitable",
+    }
+
+    st.dataframe(
+        all_cust[show_cols].rename(columns=col_labels).sort_values("Profit", ascending=False),
+        use_container_width=True, hide_index=True,
+    )
+
+    csv_cust = all_cust[show_cols].rename(columns=col_labels).sort_values("Profit", ascending=False).to_csv(index=False).encode("utf-8")
+    st.download_button("Download all customers as CSV", csv_cust, "all_customers.csv", "text/csv")
 
 # ============ RESTAURANTS ============
 with tab_restaurants:
@@ -545,6 +639,7 @@ with tab_restaurants:
 
         # --- Restaurant-level KPI summary (aggregated from filtered restaurants) ---
         total_orders = rests["orders"].sum()
+        total_delivered = rests["delivered_orders"].sum()
         total_gmv = rests["gmv"].sum()
         total_profit = rests["profit"].sum()
         total_commission = rests["commission_bhd"].sum()
@@ -554,11 +649,12 @@ with tab_restaurants:
         total_loss_orders = rests["loss_orders"].sum()
 
         st.markdown("##### Summary")
-        c = st.columns(4)
+        c = st.columns(5)
         c[0].metric("Total restaurants", num(len(rests)))
         c[1].metric("Total orders", num(total_orders))
-        c[2].metric("Total GMV", bhd(total_gmv))
-        c[3].metric("Total profit", bhd(total_profit))
+        c[2].metric("Delivered orders", num(total_delivered))
+        c[3].metric("Total GMV", bhd(total_gmv))
+        c[4].metric("Total profit", bhd(total_profit))
 
         c = st.columns(4)
         c[0].metric("AOV", bhd(total_net_food / total_orders if total_orders else 0))
@@ -568,15 +664,15 @@ with tab_restaurants:
 
         c = st.columns(4)
         c[0].metric("Take rate", pct(total_commission / total_gmv * 100 if total_gmv else 0))
-        c[1].metric("CPO (3PL)", bhd(total_cost_3pl / total_orders if total_orders else 0))
-        c[2].metric("RPO", bhd((total_commission + rests["delivery_rev"].sum() + total_rest_subsidy) / total_orders if total_orders else 0))
+        c[1].metric("CPO (3PL)", bhd(total_cost_3pl / total_delivered if total_delivered else 0))
+        c[2].metric("RPO", bhd((rests["delivery_rev"].sum() + total_rest_subsidy) / total_delivered if total_delivered else 0))
         c[3].metric("Profit / order", bhd(total_profit / total_orders if total_orders else 0))
 
         c = st.columns(4)
         c[0].metric("Profit margin", pct(total_profit / total_gmv * 100 if total_gmv else 0))
         c[1].metric("Loss rate", pct(total_loss_orders / total_orders * 100 if total_orders else 0))
-        c[2].metric("Commission yield", pct(total_commission / total_net_food * 100 if total_net_food else 0))
-        c[3].metric("Rest subsidy total", bhd(total_rest_subsidy))
+        c[2].metric("Rest offer total", bhd(total_rest_subsidy))
+        c[3].metric("", "")
 
         c = st.columns(4)
         c[0].metric("Total customers", num(rests["total_customers"].sum()))
@@ -627,51 +723,32 @@ with tab_restaurants:
             fig.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
             st.plotly_chart(fig, use_container_width=True)
 
-        # Commission yield chart
-        st.markdown("#### Commission yield vs delivery cost ratio (top 15)")
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            y=top15["restaurant"][::-1], x=top15["commission_yield_pct"][::-1],
-            orientation="h", name="Commission yield %", marker_color="#10b981",
-        ))
-        fig.add_trace(go.Bar(
-            y=top15["restaurant"][::-1], x=top15["delivery_cost_ratio_pct"][::-1],
-            orientation="h", name="Delivery cost ratio %", marker_color="#ef4444",
-        ))
-        fig.update_layout(
-            height=450, margin=dict(l=20, r=20, t=20, b=20),
-            barmode="group", xaxis_title="%",
-            legend=dict(orientation="h", y=1.05),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
         # Full table
         st.markdown(f"#### All restaurants ({len(rests)})")
         show = rests.copy()
-        show["GMV"] = show["gmv"].apply(bhd)
-        show["AOV"] = show["aov"].apply(bhd)
-        show["AOV Profitable"] = show["aov_profitable"].apply(bhd)
-        show["AOV Loss"] = show["aov_loss"].apply(bhd)
-        show["AOV Break-even"] = show["aov_breakeven"].apply(bhd)
-        show["Commission %"] = show["avg_commission_pct"].apply(pct)
-        show["Commission BHD"] = show["commission_bhd"].apply(bhd)
-        show["Yield %"] = show["commission_yield_pct"].apply(pct)
-        show["Rest subsidy"] = show["rest_subsidy"].apply(bhd)
-        show["Profit"] = show["profit"].apply(bhd)
-        show["Margin"] = show["profit_margin_pct"].apply(pct)
-        show["Loss %"] = show["loss_order_pct"].apply(pct)
+        show["GMV"] = show["gmv"].round(3)
+        show["AOV"] = show["aov"].round(3)
+        show["AOV Profitable"] = show["aov_profitable"].round(3)
+        show["AOV Loss"] = show["aov_loss"].round(3)
+        show["AOV Break-even"] = show["aov_breakeven"].round(3)
+        show["Commission %"] = show["avg_commission_pct"].round(1).astype(str) + "%"
+        show["Commission BHD"] = show["commission_bhd"].round(3)
+        show["Rest Offer"] = show["rest_subsidy"].round(3)
+        show["Profit"] = show["profit"].round(3)
+        show["Margin %"] = show["profit_margin_pct"].round(1).astype(str) + "%"
+        show["Loss %"] = show["loss_order_pct"].round(1).astype(str) + "%"
         show["Avg KM"] = show["avg_km"].round(1)
-        show["CPO"] = show["cpo_restaurant"].apply(bhd)
-        show["BHD/KM"] = show["bhd_per_km"].apply(bhd)
+        show["CPO"] = show["cpo_restaurant"].round(3)
+        show["BHD/KM"] = show["bhd_per_km"].round(3)
         show["Customers"] = show["total_customers"]
-        show["Repeat %"] = show["repeat_rate_pct"].apply(pct)
+        show["Repeat %"] = show["repeat_rate_pct"].round(1).astype(str) + "%"
 
         st.dataframe(
             show[[
                 "restaurant_id", "restaurant", "orders", "Customers", "Repeat %", "GMV",
                 "AOV", "AOV Profitable", "AOV Loss", "AOV Break-even",
-                "Commission %", "Commission BHD", "Yield %", "Rest subsidy",
-                "Profit", "Margin", "Loss %", "Avg KM", "CPO", "BHD/KM",
+                "Commission %", "Commission BHD", "Rest Offer",
+                "Profit", "Margin %", "Loss %", "Avg KM", "CPO", "BHD/KM",
             ]].rename(columns={"restaurant_id": "ID"}),
             use_container_width=True, hide_index=True,
         )
@@ -847,10 +924,10 @@ with tab_time:
     if len(dow) > 0:
         st.markdown("#### Day-of-week detail")
         dow_show = dow.copy()
-        dow_show["Mix %"] = dow_show["mix_pct"].apply(pct)
-        dow_show["GMV"] = dow_show["gmv"].apply(bhd)
-        dow_show["Total profit"] = dow_show["profit"].apply(bhd)
-        dow_show["Avg profit/order"] = dow_show["avg_profit"].apply(bhd)
+        dow_show["Mix %"] = dow_show["mix_pct"].round(1).astype(str) + "%"
+        dow_show["GMV"] = dow_show["gmv"].round(3)
+        dow_show["Total profit"] = dow_show["profit"].round(3)
+        dow_show["Avg profit/order"] = dow_show["avg_profit"].round(3)
         st.dataframe(
             dow_show[["day_of_week", "orders", "Mix %", "GMV", "Total profit", "Avg profit/order"]],
             use_container_width=True, hide_index=True,
@@ -865,7 +942,7 @@ with tab_pivot:
     dims = [
         "restaurant_display", "user_id", "date_str", "month", "day_of_week",
         "hour", "daypart", "distance_bracket", "payment_method_clean",
-        "is_wallet", "is_discounted", "is_profitable",
+        "is_wallet", "is_discounted", "is_profitable", "is_delivered",
     ]
     measures = {
         "order_profit": "Order profit",
@@ -952,7 +1029,7 @@ with tab_raw:
         "order_id", "user_id", "restaurant_display", "date_str", "order_time",
         "total_with_vat_delivery", "commission_bhd", "delivery_revenue",
         "restaurant_delivery_offer", "cost_3pl", "order_profit",
-        "distance_bracket", "payment_method_clean",
+        "distance_bracket", "payment_method_clean", "driver_id", "is_delivered",
     ]
     cols = st.multiselect(
         "Columns to show", all_cols,
@@ -965,5 +1042,177 @@ with tab_raw:
         csv = filtered[cols].to_csv(index=False).encode("utf-8")
         st.download_button("📥 Download filtered data as CSV", csv, "filtered_orders.csv", "text/csv")
 
+# ============ RATIOS ============
+with tab_ratios:
+    st.markdown("#### Ratio Definitions & Formulas")
+    st.caption("How each metric is calculated. D.Orders = Delivered Orders only (excludes virtual drivers 1, 17, 18 and orders with no driver).")
+
+    st.markdown("---")
+
+    # --- RAW TOTALS ---
+    st.markdown("##### Raw Totals")
+    st.markdown("""
+| Metric | Formula | Notes |
+|---|---|---|
+| **Total Orders** | `COUNT(all orders)` | Every row in the dataset |
+| **Delivered Orders** | `COUNT(orders WHERE driver NOT IN [empty, 1, 17, 18])` | Real driver assigned |
+| **GMV** | `SUM(Column P)` | Customer payment for food incl. VAT & delivery |
+| **Commission** | `SUM(Column V)` | Commission in BHD |
+| **Delivery Rev x1.10** | `SUM(Column T × 1.10)` — D.Orders only | Delivery fee charged × 1.10, delivered orders only |
+| **Rest Offer** | `SUM(Column AB)` | Restaurant delivery offer subsidy |
+| **3PL Cost** | `SUM(Column AK)` — D.Orders only | Third-party logistics cost, delivered orders only |
+| **Gross Revenue** | `Commission + Delivery Rev + Rest Offer` | Total revenue before 3PL cost |
+| **Total Discount** | `SUM(Column AD)` | All discounts given |
+| **Total KM** | `SUM(CEIL(Column AF))` — D.Orders only | Each order's KM rounded up to whole number, delivered only |
+""")
+
+    st.markdown("---")
+
+    # --- PROFITABILITY ---
+    st.markdown("##### Profitability")
+    st.markdown("""
+| Metric | Formula | Notes |
+|---|---|---|
+| **Net Profit** | `Commission + Delivery Rev x1.10 + Rest Offer − 3PL Cost` | Core profit formula |
+| **Profit Margin %** | `(Net Profit ÷ GMV) × 100` | How much profit per BHD of GMV |
+| **Loss Rate %** | `(Orders WHERE profit ≤ 0 ÷ Total Orders) × 100` | % of orders that lose money |
+| **Loss Amount** | `SUM(profit) WHERE profit ≤ 0` | Total BHD lost on unprofitable orders |
+""")
+
+    st.markdown("---")
+
+    # --- UNIT ECONOMICS ---
+    st.markdown("##### Unit Economics")
+    st.markdown("""
+| Metric | Formula | Notes |
+|---|---|---|
+| **AOV** | `GMV ÷ Total Orders` | Average order value |
+| **Profit / Order** | `Net Profit ÷ Total Orders` | Average profit per order (all orders) |
+| **Break-even Order Value** | `(Avg 3PL per D.Order) ÷ (Take Rate% + Avg Delivery Fee Ratio)` | Minimum order value to break even |
+| **Discounted Order %** | `(Orders with discount > 0 ÷ Total Orders) × 100` | % of orders where a discount was applied |
+""")
+
+    st.markdown("---")
+
+    # --- DELIVERY KPIs ---
+    st.markdown("##### Delivery KPIs (delivered orders only)")
+    st.markdown("""
+| Metric | Formula | Notes |
+|---|---|---|
+| **CPO (3PL)** | `3PL Cost ÷ Delivered Orders` | Cost per delivered order |
+| **RPO** | `(Delivery Rev x1.10 + Rest Offer) ÷ Delivered Orders` | Delivery revenue per delivered order |
+| **RPO − CPO Spread** | `RPO − CPO` | Margin per delivered order |
+| **CPO Coverage** | `(RPO ÷ CPO) × 100` | How much delivery revenue covers 3PL cost |
+| **Chargeable Delivery %** | `(D.Orders with delivery fee > 0 ÷ Delivered Orders) × 100` | % of delivered orders that charge delivery |
+| **Take Rate %** | `(Commission ÷ GMV) × 100` | Commission as % of GMV |
+""")
+
+    st.markdown("---")
+
+    # --- ORDER-LEVEL PROFIT ---
+    st.markdown("##### Order-Level Profit (per row)")
+    st.markdown("""
+| Field | Formula |
+|---|---|
+| **Order Profit** | `Commission(V) + (Delivery Fee(T) × 1.10) + Rest Offer(AB) − 3PL Cost(AK)` |
+| **Profit Margin %** | `(Order Profit ÷ GMV(P)) × 100` |
+| **Is Profitable** | `1 if Order Profit > 0, else 0` |
+| **KM Billable** | `CEIL(Column AF)` — rounded up to whole number |
+| **Distance Bracket** | `0-1km, 1-2km, 2-3km, 3-4km, 4-5km, 5km+` based on KM Billable |
+| **Is Delivered** | `1 if driver exists AND driver NOT IN [1, 17], else 0 (driver 18 removed entirely)` |
+""")
+
+    st.markdown("---")
+
+    # --- CUSTOMER KPIs ---
+    st.markdown("##### Customer KPIs")
+    st.markdown("""
+| Metric | Formula |
+|---|---|
+| **Total Customers** | `COUNT(DISTINCT user_id)` |
+| **Repeat Customers** | `Customers with ≥ 2 orders` |
+| **Repeat Rate %** | `(Repeat Customers ÷ Total Customers) × 100` |
+| **Orders / Customer** | `Total Orders ÷ Total Customers` |
+| **AOV** | `GMV ÷ Total Orders` |
+| **AOV Profitable** | `AVG(GMV) of profitable orders` |
+| **AOV Loss** | `AVG(GMV) of loss-making orders` |
+| **Profitable Customer %** | `(Customers with total profit > 0 ÷ Total Customers) × 100` |
+| **Discounted Order %** | `(Orders with discount > 0 ÷ Total Orders) × 100` |
+| **Payment Method %** | `(Orders with payment method X ÷ Total Orders) × 100` |
+""")
+
+    st.markdown("---")
+
+    # --- CUSTOMER LEVELS ---
+    st.markdown("##### Customer Levels (RFM Segmentation)")
+    st.markdown("""
+Each customer is scored on 3 dimensions using **quintiles** (1–5 scale):
+
+| Dimension | What it measures | How it's scored |
+|---|---|---|
+| **R — Recency** | Days since last order | Fewer days = higher score (5 = most recent) |
+| **F — Frequency** | Total number of orders | More orders = higher score (5 = most frequent) |
+| **M — Monetary** | Total revenue (GMV) | Higher revenue = higher score (5 = highest spender) |
+
+Customers are split into 5 equal groups (quintiles) for each dimension. A customer in the top 20% for frequency gets F=5, bottom 20% gets F=1.
+
+**Level assignment** is based on Recency (R) and Frequency (F) scores:
+
+| Level | Name | Rule | Who they are |
+|---|---|---|---|
+| **Level 1** | VIP | R ≥ 4 AND F ≥ 4 | Ordered recently AND order often — best customers |
+| **Level 2** | Loyal | R ≥ 3 AND F ≥ 3 | Fairly recent AND fairly frequent — solid base |
+| **Level 3** | New | R ≥ 4 AND F ≤ 2 | Ordered recently BUT only 1-2 times — just joined |
+| **Level 4** | At Risk | R ≤ 2 AND F ≥ 3 | Used to order often BUT haven't ordered recently — slipping away |
+| **Level 5** | Potential | R ≥ 3 AND F ≤ 2 | Somewhat recent, low frequency — could grow |
+| **Level 6** | Inactive | R ≤ 2 AND F ≤ 2 | Haven't ordered recently AND rarely ordered — disengaged |
+""")
+
+    st.markdown("---")
+
+    # --- RESTAURANT KPIs ---
+    st.markdown("##### Restaurant KPIs")
+    st.markdown("""
+| Metric | Formula |
+|---|---|
+| **Rest Offer** | `SUM(Column AB)` per restaurant |
+| **Delivery Cost Ratio %** | `(3PL Cost ÷ GMV) × 100` |
+| **Profit Margin %** | `(Profit ÷ GMV) × 100` |
+| **Loss Order %** | `(Loss-making orders ÷ Total Orders) × 100` |
+| **CPO (Restaurant)** | `3PL Cost ÷ Delivered Orders` per restaurant |
+| **BHD / KM** | `GMV ÷ Total KM` per restaurant |
+| **Repeat Rate %** | `(Customers with ≥ 2 orders at restaurant ÷ Total Customers) × 100` |
+| **AOV Break-even** | `(Avg CPO − Avg Delivery Rev − Avg Rest Offer) ÷ (Avg Commission Rate ÷ 100)` |
+""")
+
+    st.markdown("---")
+
+    # --- EXCEL COLUMN REFERENCE ---
+    st.markdown("##### Excel Column Reference")
+    st.markdown("""
+| Column | Field |
+|---|---|
+| **C** | Driver ID (empty / 1 / 17 / 18 = not delivered) |
+| **I** | Restaurant ID |
+| **J** | Restaurant Name |
+| **K** | Order ID |
+| **M** | User ID |
+| **N** | Order Date |
+| **O** | Order Time |
+| **P** | GMV (Customer Payment for Food) |
+| **Q** | VAT |
+| **R** | Amount ex-VAT |
+| **S** | Wallet Paid |
+| **T** | Delivery Fee |
+| **U** | Commission % |
+| **V** | Commission BHD |
+| **Z** | Payment Method (blank = Benefits Pay) |
+| **AB** | Restaurant Delivery Offer |
+| **AC** | Discount % |
+| **AD** | Discount BHD |
+| **AF** | KM Delivered |
+| **AK** | 3PL Cost |
+""")
+
 st.markdown("---")
-st.caption("Finance Team Analytics · SQLite database · data persists across sessions")
+st.caption("Finance Team Analytics")

@@ -41,6 +41,12 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         out = out[out["distance_bracket"].isin(filters["distance_brackets"])]
     if filters.get("restaurants"):
         out = out[out["restaurant_display"].isin(filters["restaurants"])]
+    if filters.get("order_id"):
+        out = out[out["order_id"].astype(str).str.contains(filters["order_id"], case=False, na=False)]
+    if filters.get("user_id"):
+        out = out[out["user_id"].astype(str).str.contains(filters["user_id"], case=False, na=False)]
+    if filters.get("restaurant_id"):
+        out = out[out["restaurant_id"].astype(str).str.contains(filters["restaurant_id"], case=False, na=False)]
     only_prof = filters.get("only_profitable")
     if only_prof is True:
         out = out[out["is_profitable"] == 1]
@@ -51,52 +57,61 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
 
 # ---------- top line ----------
 def top_line(df: pd.DataFrame) -> dict:
+    _zero_keys = [
+        "orders", "delivered_orders", "gmv", "net_food", "commission", "delivery_rev",
+        "rest_offer", "cost_3pl", "profit", "profit_margin_pct",
+        "loss_rate_pct", "loss_amount", "aov", "aov_profitable", "aov_loss", "cpo", "rpo",
+        "rpo_cpo_spread", "profit_per_order", "profit_per_km",
+        "total_vat", "total_discount", "total_km", "bhd_per_km",
+        "take_rate_pct", "gross_revenue",
+        "cpo_coverage_pct", "chargeable_delivery_pct",
+        "breakeven_order_value", "discount_order_pct",
+    ]
     if len(df) == 0:
-        return {k: 0 for k in [
-            "orders", "gmv", "net_food", "commission", "delivery_rev",
-            "rest_offer", "cost_3pl", "profit", "profit_margin_pct",
-            "loss_rate_pct", "loss_amount", "aov", "cpo", "rpo",
-            "rpo_cpo_spread", "profit_per_order", "profit_per_km",
-            "total_vat", "total_discount", "total_km", "bhd_per_km",
-            "take_rate_pct", "gross_revenue",
-            "delivery_fee_coverage_pct", "chargeable_delivery_pct",
-            "breakeven_order_value", "organic_order_pct",
-        ]}
+        return {k: 0 for k in _zero_keys}
+
+    n = len(df)
+    # Delivered orders — used for delivery-related ratios (3PL, KM, CPO, RPO)
+    delivered = df[df["is_delivered"] == 1] if "is_delivered" in df.columns else df
+    nd = len(delivered)
+
     gmv = df["total_with_vat_delivery"].sum()
     net_food = df["amount_ex_vat"].sum()
     commission = df["commission_bhd"].sum()
-    delivery_rev = df["delivery_revenue"].sum()
+    delivery_rev = delivered["delivery_revenue"].sum()
     rest_offer = df["restaurant_delivery_offer"].sum()
-    cost_3pl = df["cost_3pl"].sum()
+    cost_3pl = delivered["cost_3pl"].sum()
     profit = commission + delivery_rev + rest_offer - cost_3pl
     gross_revenue = commission + delivery_rev + rest_offer
     loss_mask = df["is_profitable"] == 0
     loss_orders = loss_mask.sum()
-    loss_amount = df.loc[loss_mask, "order_profit"].sum()  # negative number
-    total_km = df["km_billable"].sum()
-    n = len(df)
+    loss_amount = df.loc[loss_mask, "order_profit"].sum()
+    total_km = delivered["km_billable"].sum()
 
     take_rate_pct = (commission / gmv * 100) if gmv else 0
-    delivery_fee_coverage_pct = (delivery_rev / cost_3pl * 100) if cost_3pl else 0
-    chargeable = (df["delivery_fee_charged"] > 0).sum()
-    chargeable_delivery_pct = (chargeable / n * 100) if n else 0
+    chargeable = (delivered["delivery_fee_charged"] > 0).sum()
+    chargeable_delivery_pct = (chargeable / nd * 100) if nd else 0
 
-    # Break-even order value: 3PL Cost per order / (take_rate + avg delivery_fee/order_value)
-    avg_3pl = cost_3pl / n if n else 0
-    avg_del_ratio = (df["delivery_fee_charged"] / df["total_with_vat_delivery"].replace(0, np.nan)).mean()
+    # Break-even uses delivered orders for cost average
+    avg_3pl = cost_3pl / nd if nd else 0
+    del_subset = delivered[delivered["total_with_vat_delivery"] > 0]
+    avg_del_ratio = (del_subset["delivery_fee_charged"] / del_subset["total_with_vat_delivery"]).mean() if len(del_subset) else 0
     avg_del_ratio = avg_del_ratio if pd.notna(avg_del_ratio) else 0
     take_rate_dec = take_rate_pct / 100
     denom = take_rate_dec + avg_del_ratio
     breakeven_ov = (avg_3pl / denom) if denom > 0 else 0
 
-    organic = ((df["discount_amount"] <= 0) & (df["restaurant_delivery_offer"] <= 0)).sum()
-    organic_pct = (organic / n * 100) if n else 0
+    discounted_orders = (df["is_discounted"] == 1).sum()
+    discount_order_pct = (discounted_orders / n * 100) if n else 0
 
-    rpo = gross_revenue / n if n else 0
-    cpo = cost_3pl / n if n else 0
+    # CPO and RPO based on delivered orders only
+    cpo = cost_3pl / nd if nd else 0
+    rpo = (delivery_rev + rest_offer) / nd if nd else 0
+    cpo_coverage_pct = (rpo / cpo * 100) if cpo else 0
 
     return {
         "orders": n,
+        "delivered_orders": nd,
         "gmv": gmv,
         "net_food": net_food,
         "commission": commission,
@@ -108,7 +123,9 @@ def top_line(df: pd.DataFrame) -> dict:
         "profit_margin_pct": (profit / gmv * 100) if gmv else 0,
         "loss_rate_pct": (loss_orders / n * 100) if n else 0,
         "loss_amount": loss_amount,
-        "aov": df["amount_ex_vat"].sum() / n if n else 0,
+        "aov": gmv / n if n else 0,
+        "aov_profitable": df.loc[df["is_profitable"] == 1, "total_with_vat_delivery"].mean() if (df["is_profitable"] == 1).any() else 0,
+        "aov_loss": df.loc[df["is_profitable"] == 0, "total_with_vat_delivery"].mean() if (df["is_profitable"] == 0).any() else 0,
         "cpo": cpo,
         "rpo": rpo,
         "rpo_cpo_spread": rpo - cpo,
@@ -119,10 +136,10 @@ def top_line(df: pd.DataFrame) -> dict:
         "total_km": total_km,
         "bhd_per_km": gmv / total_km if total_km else 0,
         "take_rate_pct": take_rate_pct,
-        "delivery_fee_coverage_pct": delivery_fee_coverage_pct,
+        "cpo_coverage_pct": cpo_coverage_pct,
         "chargeable_delivery_pct": chargeable_delivery_pct,
         "breakeven_order_value": breakeven_ov,
-        "organic_order_pct": organic_pct,
+        "discount_order_pct": discount_order_pct,
     }
 
 
@@ -144,7 +161,7 @@ def customer_lifetimes(df: pd.DataFrame) -> pd.DataFrame:
         total_discount=("discount_amount", "sum"),
         avg_km=("km_billable", "mean"),
     ).reset_index()
-    lt["aov"] = lt["net_food"] / lt["orders"]
+    lt["aov"] = lt["revenue"] / lt["orders"]
     return lt
 
 
@@ -160,7 +177,7 @@ def customer_kpis(df: pd.DataFrame) -> dict:
             "profitable_customer_pct", "wallet_penetration_pct",
             "benefits_pay_pct", "discount_penetration_pct", "avg_discount_bhd",
             "top20_rev_concentration_pct", "dormant_30_pct", "dormant_60_pct",
-            "dormant_90_pct", "organic_order_pct",
+            "dormant_90_pct",
         ]} | {"lifetimes": lt}
 
     repeat = int((lt["orders"] >= 2).sum())
@@ -180,9 +197,6 @@ def customer_kpis(df: pd.DataFrame) -> dict:
     # Use all data to find global first orders, then count those whose first order >= period start
     new_customers = int((lt["first_order"] >= min_date).sum()) if pd.notna(min_date) else 0
 
-    organic = ((df["discount_amount"] <= 0) & (df["restaurant_delivery_offer"] <= 0)).sum()
-    organic_pct = (organic / n * 100) if n else 0
-
     return {
         "total_customers": users,
         "new_customers": new_customers,
@@ -190,9 +204,9 @@ def customer_kpis(df: pd.DataFrame) -> dict:
         "one_time_customers": users - repeat,
         "repeat_rate_pct": repeat / users * 100,
         "opc": n / users,
-        "aov": df["amount_ex_vat"].sum() / n if n else 0,
-        "avg_lt_rev": lt["revenue"].mean(),
-        "avg_lt_profit": lt["profit"].mean(),
+        "aov": df["total_with_vat_delivery"].sum() / n if n else 0,
+        "aov_profitable": df.loc[df["is_profitable"] == 1, "total_with_vat_delivery"].mean() if (df["is_profitable"] == 1).any() else 0,
+        "aov_loss": df.loc[df["is_profitable"] == 0, "total_with_vat_delivery"].mean() if (df["is_profitable"] == 0).any() else 0,
         "profitable_customer_pct": profitable / users * 100,
         "wallet_penetration_pct": df["is_wallet"].sum() / n * 100 if n else 0,
         "benefits_pay_pct": (df["payment_method_clean"] == "Benefits Pay").sum() / n * 100 if n else 0,
@@ -202,8 +216,8 @@ def customer_kpis(df: pd.DataFrame) -> dict:
         "dormant_30_pct": (days_since > 30).sum() / users * 100,
         "dormant_60_pct": (days_since > 60).sum() / users * 100,
         "dormant_90_pct": (days_since > 90).sum() / users * 100,
-        "organic_order_pct": organic_pct,
         "lifetimes": lt,
+        "payment_method_mix": df["payment_method_clean"].value_counts(normalize=True).mul(100).round(1).to_dict() if n else {},
     }
 
 
@@ -235,16 +249,16 @@ def rfm_segmentation(df: pd.DataFrame) -> pd.DataFrame:
     def label(row):
         r, f = row["r"], row["f"]
         if r >= 4 and f >= 4:
-            return "Champions"
+            return "Level 1 — VIP"
         if r >= 3 and f >= 3:
-            return "Loyal"
+            return "Level 2 — Loyal"
         if r >= 4 and f <= 2:
-            return "New"
+            return "Level 3 — New"
         if r <= 2 and f >= 3:
-            return "At Risk"
-        if r <= 2 and f <= 2:
-            return "Lost"
-        return "Potential"
+            return "Level 4 — At Risk"
+        if r >= 3 and f <= 2:
+            return "Level 5 — Potential"
+        return "Level 6 — Inactive"
 
     lt["segment"] = lt.apply(label, axis=1)
     return lt[["user_id", "recency", "frequency", "monetary", "r", "f", "m", "rfm", "segment"]]
@@ -255,24 +269,29 @@ def restaurant_kpis(df: pd.DataFrame) -> pd.DataFrame:
     if len(df) == 0:
         return pd.DataFrame()
     grp = df.groupby("restaurant_display")
-    r = grp.agg(
-        restaurant_id=("restaurant_id", "first"),
-        orders=("order_id", "count"),
-        gmv=("total_with_vat_delivery", "sum"),
-        net_food=("amount_ex_vat", "sum"),
-        commission_bhd=("commission_bhd", "sum"),
-        avg_commission_pct=("commission_pct", "mean"),
-        delivery_rev=("delivery_revenue", "sum"),
-        rest_subsidy=("restaurant_delivery_offer", "sum"),
-        cost_3pl=("cost_3pl", "sum"),
-        profit=("order_profit", "sum"),
-        loss_orders=("is_profitable", lambda s: (s == 0).sum()),
-        subsidy_orders=("restaurant_delivery_offer", lambda s: (s > 0).sum()),
-        avg_km=("km_billable", "mean"),
-        total_km=("km_billable", "sum"),
-    ).reset_index().rename(columns={"restaurant_display": "restaurant"})
+    agg_dict = {
+        "restaurant_id": ("restaurant_id", "first"),
+        "orders": ("order_id", "count"),
+        "gmv": ("total_with_vat_delivery", "sum"),
+        "net_food": ("amount_ex_vat", "sum"),
+        "commission_bhd": ("commission_bhd", "sum"),
+        "avg_commission_pct": ("commission_pct", "mean"),
+        "delivery_rev": ("delivery_revenue", "sum"),
+        "rest_subsidy": ("restaurant_delivery_offer", "sum"),
+        "cost_3pl": ("cost_3pl", "sum"),
+        "profit": ("order_profit", "sum"),
+        "loss_orders": ("is_profitable", lambda s: (s == 0).sum()),
+        "subsidy_orders": ("restaurant_delivery_offer", lambda s: (s > 0).sum()),
+        "avg_km": ("km_billable", "mean"),
+        "total_km": ("km_billable", "sum"),
+    }
+    if "is_delivered" in df.columns:
+        agg_dict["delivered_orders"] = ("is_delivered", "sum")
+    r = grp.agg(**agg_dict).reset_index().rename(columns={"restaurant_display": "restaurant"})
+    if "delivered_orders" not in r.columns:
+        r["delivered_orders"] = r["orders"]
 
-    r["aov"] = r["net_food"] / r["orders"]
+    r["aov"] = r["gmv"] / r["orders"]
 
     # AOV for profitable / loss-making orders + break-even AOV per restaurant
     profitable_aov = df[df["is_profitable"] == 1].groupby("restaurant_display")["amount_ex_vat"].mean()
@@ -301,7 +320,7 @@ def restaurant_kpis(df: pd.DataFrame) -> pd.DataFrame:
     r["delivery_subsidy_pct"] = r["subsidy_orders"] / r["orders"] * 100
     r["profit_margin_pct"] = np.where(r["gmv"] > 0, r["profit"] / r["gmv"] * 100, 0)
     r["loss_order_pct"] = r["loss_orders"] / r["orders"] * 100
-    r["cpo_restaurant"] = r["cost_3pl"] / r["orders"]
+    r["cpo_restaurant"] = np.where(r["delivered_orders"] > 0, r["cost_3pl"] / r["delivered_orders"], 0)
     r["delivery_cost_ratio_pct"] = np.where(r["gmv"] > 0, r["cost_3pl"] / r["gmv"] * 100, 0)
     r["bhd_per_km"] = np.where(r["total_km"] > 0, r["gmv"] / r["total_km"], 0)
 
@@ -338,20 +357,23 @@ def bracket_analysis(df: pd.DataFrame) -> pd.DataFrame:
         sub = df[df["distance_bracket"] == b]
         n = len(sub)
         if n == 0:
-            rows.append({"bracket": b, "orders": 0, "gmv": 0, "rpo": 0, "cpo": 0,
+            rows.append({"bracket": b, "orders": 0, "delivered": 0, "gmv": 0, "rpo": 0, "cpo": 0,
                          "avg_profit": 0, "total_profit": 0, "loss_rate": 0, "order_mix_pct": 0})
             continue
+        delivered = sub[sub["is_delivered"] == 1] if "is_delivered" in sub.columns else sub
+        nd = len(delivered)
         commission = sub["commission_bhd"].sum()
-        delivery_rev = sub["delivery_revenue"].sum()
+        delivery_rev = delivered["delivery_revenue"].sum()
         rest_offer = sub["restaurant_delivery_offer"].sum()
-        cost_3pl = sub["cost_3pl"].sum()
+        cost_3pl = delivered["cost_3pl"].sum()
         profit = commission + delivery_rev + rest_offer - cost_3pl
         rows.append({
             "bracket": b,
             "orders": n,
+            "delivered": nd,
             "gmv": sub["total_with_vat_delivery"].sum(),
-            "rpo": (commission + delivery_rev + rest_offer) / n,
-            "cpo": cost_3pl / n,
+            "rpo": (delivery_rev + rest_offer) / nd if nd else 0,
+            "cpo": cost_3pl / nd if nd else 0,
             "avg_profit": profit / n,
             "total_profit": profit,
             "loss_rate": (sub["is_profitable"] == 0).sum() / n * 100,

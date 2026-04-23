@@ -39,6 +39,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             upload_id INTEGER NOT NULL,
+            driver_id TEXT,
             restaurant_id TEXT,
             restaurant_name TEXT,
             order_id TEXT,
@@ -59,6 +60,8 @@ def init_db():
             km_delivered REAL,
             cost_3pl REAL,
             -- enriched fields
+            is_delivered INTEGER,
+            is_3pl INTEGER,
             total_paid REAL,
             delivery_revenue REAL,
             km_billable INTEGER,
@@ -78,6 +81,19 @@ def init_db():
             FOREIGN KEY (upload_id) REFERENCES uploads(id)
         )
     """)
+    # Migrate: add new columns if upgrading from older schema
+    try:
+        conn.execute("ALTER TABLE orders ADD COLUMN driver_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE orders ADD COLUMN is_delivered INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE orders ADD COLUMN is_3pl INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_restaurant ON orders(restaurant_display)")
@@ -88,14 +104,14 @@ def init_db():
 
 # Columns to store (must match the enriched DataFrame from parser.py)
 STORE_COLS = [
-    "restaurant_id", "restaurant_name", "order_id", "user_id",
+    "driver_id", "restaurant_id", "restaurant_name", "order_id", "user_id",
     "order_date", "order_time",
     "amount_ex_vat", "vat_amount", "total_with_vat_delivery",
     "wallet_paid", "delivery_fee_charged", "commission_pct",
     "commission_bhd", "payment_method", "restaurant_delivery_offer",
     "discount_pct", "discount_amount", "km_delivered", "cost_3pl",
     # enriched
-    "total_paid", "delivery_revenue", "km_billable",
+    "is_delivered", "total_paid", "delivery_revenue", "km_billable",
     "payment_method_clean", "is_wallet", "is_discounted",
     "order_profit", "profit_margin_pct", "is_profitable",
     "distance_bracket", "hour", "daypart", "day_of_week",
@@ -158,7 +174,7 @@ def load_all_orders() -> pd.DataFrame:
                 "discount_amount", "km_delivered", "cost_3pl",
                 "total_paid", "delivery_revenue", "order_profit", "profit_margin_pct"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-    for col in ["km_billable", "is_wallet", "is_discounted", "is_profitable", "hour"]:
+    for col in ["km_billable", "is_wallet", "is_discounted", "is_profitable", "is_delivered", "hour"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
     return df
