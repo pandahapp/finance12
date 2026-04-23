@@ -889,6 +889,40 @@ with tab_profit:
     if km_rows:
         st.dataframe(pd.DataFrame(km_rows), use_container_width=True, hide_index=True)
 
+    # ── TAKE RATE SCENARIO ──
+    st.markdown("---")
+    st.markdown("#### 🎯 Take Rate Scenario")
+    current_take_rate = (filtered["commission_bhd"].sum() / filtered["total_with_vat_delivery"].sum() * 100) if filtered["total_with_vat_delivery"].sum() else 0
+    st.caption(f"Current average take rate: **{current_take_rate:.2f}%**. Change it to see the impact on profit.")
+
+    tr_new = st.slider("New take rate %", 0.0, 30.0, round(current_take_rate, 1), 0.1, key="take_rate_slider")
+
+    # Recalculate commission with new take rate
+    tr_commission = filtered["total_with_vat_delivery"] * (tr_new / 100)
+    tr_profit = (
+        tr_commission
+        + filtered["delivery_revenue"]
+        + filtered["restaurant_delivery_offer"]
+        - filtered["cost_3pl"]
+    )
+    tr_total = tr_profit.sum()
+    tr_loss = (tr_profit <= 0).sum() / total_orders * 100
+    tr_margin = (tr_total / scen_gmv * 100) if scen_gmv else 0
+    tr_commission_total = tr_commission.sum()
+    baseline_commission = filtered["commission_bhd"].sum()
+
+    sc = st.columns(4)
+    sc[0].metric("Baseline Take Rate", pct(current_take_rate))
+    sc[1].metric("Scenario Take Rate", pct(tr_new))
+    sc[2].metric("Commission Change", bhd(tr_commission_total - baseline_commission), delta=bhd(tr_commission_total - baseline_commission))
+    sc[3].metric("", "")
+
+    sc = st.columns(4)
+    sc[0].metric("Baseline Profit", bhd(kpi["profit"]))
+    sc[1].metric("Scenario Profit", bhd(tr_total), delta=bhd(tr_total - kpi["profit"]))
+    sc[2].metric("Scenario Margin", pct(tr_margin), delta=f"{tr_margin - kpi['profit_margin_pct']:+.1f}pp")
+    sc[3].metric("Scenario Loss Rate", pct(tr_loss), delta=f"{tr_loss - kpi['loss_rate_pct']:+.1f}pp")
+
 # ============ TIME ANALYSIS ============
 with tab_time:
     tk = time_based_kpis(filtered)
