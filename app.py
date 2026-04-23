@@ -804,7 +804,13 @@ with tab_profit:
     st.caption("Set delivery charge per KM to simulate profit impact.")
 
     # --- Per-KM delivery charge ---
-    st.markdown("##### Delivery charge per KM")
+    col_title, col_reset = st.columns([4, 1])
+    col_title.markdown("##### Delivery charge per KM")
+    if col_reset.button("Reset KM", use_container_width=True, key="reset_km"):
+        for key in list(st.session_state.keys()):
+            if key.startswith("km_"):
+                del st.session_state[key]
+        st.rerun()
 
     # Get all unique KM values sorted
     km_values = sorted(filtered["km_billable"].unique())
@@ -891,7 +897,12 @@ with tab_profit:
 
     # ── TAKE RATE SCENARIO ──
     st.markdown("---")
-    st.markdown("#### 🎯 Take Rate Scenario")
+    col_title2, col_reset2 = st.columns([4, 1])
+    col_title2.markdown("#### 🎯 Take Rate Scenario")
+    if col_reset2.button("Reset Take Rate", use_container_width=True, key="reset_tr"):
+        if "take_rate_slider" in st.session_state:
+            del st.session_state["take_rate_slider"]
+        st.rerun()
     current_take_rate = (filtered["commission_bhd"].sum() / filtered["total_with_vat_delivery"].sum() * 100) if filtered["total_with_vat_delivery"].sum() else 0
     st.caption(f"Current average take rate: **{current_take_rate:.2f}%**. Change it to see the impact on profit.")
 
