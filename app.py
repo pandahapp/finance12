@@ -806,11 +806,6 @@ with tab_profit:
     # --- Per-KM delivery charge ---
     col_title, col_reset = st.columns([4, 1])
     col_title.markdown("##### Delivery charge per KM")
-    if col_reset.button("Reset KM", use_container_width=True, key="reset_km"):
-        for key in list(st.session_state.keys()):
-            if key.startswith("km_"):
-                del st.session_state[key]
-        st.rerun()
 
     # Get all unique KM values sorted
     km_values = sorted(filtered["km_billable"].unique())
@@ -831,6 +826,13 @@ with tab_profit:
         else:
             km_avg[km] = 0.0
 
+    # Reset button — clear overrides so inputs go back to data avg
+    if "km_overrides" not in st.session_state:
+        st.session_state.km_overrides = {}
+    if col_reset.button("Reset KM", use_container_width=True, key="reset_km"):
+        st.session_state.km_overrides = {}
+        st.rerun()
+
     # Show inputs in rows of 6 with order info and avg as label
     km_override = {}
     for i in range(0, len(km_values), 6):
@@ -839,11 +841,16 @@ with tab_profit:
         for j, km in enumerate(batch):
             pct_of_total = (km_counts[km] / total_orders * 100) if total_orders else 0
             bc[j].caption(f"{km_counts[km]:,} orders ({pct_of_total:.1f}%) · avg {km_avg[km]:.3f}")
-            # Use session state value if set, otherwise default to avg
-            default_val = st.session_state.get(f"km_{km}", km_avg[km])
-            km_override[km] = bc[j].number_input(
-                f"{km} KM", min_value=0.0, max_value=10.0, value=default_val, step=0.050, format="%.3f", key=f"km_{km}"
+            # Default = data avg, override from session if user changed it
+            current_val = st.session_state.km_overrides.get(km, km_avg[km])
+            new_val = bc[j].number_input(
+                f"{km} KM", min_value=0.0, max_value=10.0, value=current_val, step=0.050, format="%.3f"
             )
+            km_override[km] = new_val
+            if new_val != km_avg[km]:
+                st.session_state.km_overrides[km] = new_val
+            elif km in st.session_state.km_overrides:
+                del st.session_state.km_overrides[km]
 
     # --- Calculate scenario ---
     scen_delivery_fee = filtered["km_billable"].map(km_override).fillna(filtered["delivery_fee_charged"])
