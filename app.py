@@ -801,31 +801,92 @@ with tab_profit:
     # Scenario sensitivity
     st.markdown("---")
     st.markdown("#### 🎯 Scenario sensitivity")
-    st.caption("Simulate profit impact of changes to delivery fee or 3PL cost.")
+    st.caption("Simulate profit impact of changes to take rate, delivery fee, 3PL cost, and delivery charge per KM bracket.")
 
-    s1, s2 = st.columns(2)
-    delivery_bump = s1.slider("Increase delivery fee by %", -50, 100, 0, 5)
-    cost_change = s2.slider("Change 3PL cost by %", -50, 100, 0, 5)
+    # --- Take Rate & Cost sliders ---
+    s1, s2, s3 = st.columns(3)
+    take_rate_change = s1.slider("Change take rate (pp)", -10.0, 10.0, 0.0, 0.5, help="Add/subtract percentage points to current commission rate")
+    delivery_bump = s2.slider("Change delivery fee %", -50, 100, 0, 5)
+    cost_change = s3.slider("Change 3PL cost %", -50, 100, 0, 5)
 
-    scen_delivery_rev = filtered["delivery_fee_charged"] * (1 + delivery_bump / 100) * 1.10
+    # --- Per-KM bracket delivery charge ---
+    st.markdown("##### Delivery charge per KM bracket")
+    st.caption("Set the delivery charge (BHD) for each distance bracket. Default = current average per bracket.")
+
+    brackets = ["0-1km", "1-2km", "2-3km", "3-4km", "4-5km", "5km+"]
+    # Calculate current avg delivery fee per bracket
+    bracket_avg = {}
+    for b in brackets:
+        sub = filtered[filtered["distance_bracket"] == b]
+        if len(sub) > 0:
+            bracket_avg[b] = round(sub["delivery_fee_charged"].mean(), 3)
+        else:
+            bracket_avg[b] = 0.0
+
+    bc = st.columns(6)
+    bracket_override = {}
+    for i, b in enumerate(brackets):
+        bracket_override[b] = bc[i].number_input(
+            b, min_value=0.0, max_value=5.0, value=bracket_avg[b], step=0.050, format="%.3f"
+        )
+
+    # --- Calculate scenario ---
+    # New commission from take rate change
+    scen_commission = filtered["total_with_vat_delivery"] * ((filtered["commission_pct"] + take_rate_change) / 100)
+
+    # New delivery fee per order based on bracket overrides
+    scen_delivery_fee = filtered["distance_bracket"].map(bracket_override).fillna(filtered["delivery_fee_charged"])
+    # Apply delivery bump % on top
+    scen_delivery_fee = scen_delivery_fee * (1 + delivery_bump / 100)
+    scen_delivery_rev = scen_delivery_fee * 1.10
+
     scen_3pl = filtered["cost_3pl"] * (1 + cost_change / 100)
     scen_profit = (
-        filtered["commission_bhd"]
+        scen_commission
         + scen_delivery_rev
         + filtered["restaurant_delivery_offer"]
         - scen_3pl
     )
     scen_total = scen_profit.sum()
     scen_loss = (scen_profit <= 0).sum() / len(filtered) * 100
+    scen_gmv = filtered["total_with_vat_delivery"].sum()
+    scen_margin = (scen_total / scen_gmv * 100) if scen_gmv else 0
 
-    sc = st.columns(3)
-    sc[0].metric("Baseline profit", bhd(kpi["profit"]))
+    # --- Results ---
+    st.markdown("##### Scenario results")
+    sc = st.columns(4)
+    sc[0].metric("Baseline Profit", bhd(kpi["profit"]))
     sc[1].metric(
-        "Scenario profit",
+        "Scenario Profit",
         bhd(scen_total),
         delta=bhd(scen_total - kpi["profit"]),
     )
-    sc[2].metric("Scenario loss rate", pct(scen_loss), delta=f"{scen_loss - kpi['loss_rate_pct']:+.1f}pp")
+    sc[2].metric("Scenario Margin", pct(scen_margin), delta=f"{scen_margin - kpi['profit_margin_pct']:+.1f}pp")
+    sc[3].metric("Scenario Loss Rate", pct(scen_loss), delta=f"{scen_loss - kpi['loss_rate_pct']:+.1f}pp")
+
+    # Breakdown per bracket
+    st.markdown("##### Impact per bracket")
+    bracket_rows = []
+    for b in brackets:
+        sub = filtered[filtered["distance_bracket"] == b]
+        n = len(sub)
+        if n == 0:
+            continue
+        base_profit = sub["order_profit"].sum()
+        s_comm = sub["total_with_vat_delivery"] * ((sub["commission_pct"] + take_rate_change) / 100)
+        s_del = sub["distance_bracket"].map(bracket_override).fillna(sub["delivery_fee_charged"]) * (1 + delivery_bump / 100) * 1.10
+        s_3pl = sub["cost_3pl"] * (1 + cost_change / 100)
+        s_prof = (s_comm + s_del + sub["restaurant_delivery_offer"] - s_3pl).sum()
+        bracket_rows.append({
+            "Bracket": b,
+            "Orders": n,
+            "Delivery Charge": bracket_override[b],
+            "Baseline Profit": round(base_profit, 3),
+            "Scenario Profit": round(s_prof, 3),
+            "Difference": round(s_prof - base_profit, 3),
+        })
+    if bracket_rows:
+        st.dataframe(pd.DataFrame(bracket_rows), use_container_width=True, hide_index=True)
 
 # ============ TIME ANALYSIS ============
 with tab_time:
