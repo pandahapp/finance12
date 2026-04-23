@@ -967,8 +967,9 @@ with tab_profit:
         - filtered["cost_3pl"]
     )
     tr_total = tr_profit.sum()
-    tr_loss = (tr_profit <= 0).sum() / total_orders * 100
-    tr_margin = (tr_total / scen_gmv * 100) if scen_gmv else 0
+    tr_loss = (tr_profit <= 0).sum() / len(filtered) * 100
+    tr_gmv = filtered["total_with_vat_delivery"].sum()
+    tr_margin = (tr_total / tr_gmv * 100) if tr_gmv else 0
     tr_commission_total = tr_commission.sum()
     baseline_commission = filtered["commission_bhd"].sum()
 
