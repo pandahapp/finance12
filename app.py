@@ -493,19 +493,16 @@ with tab_customers:
     c[2].metric("AOV Loss", bhd(k["aov_loss"]))
     c[3].metric("Profitable customers", pct(k["profitable_customer_pct"]))
 
-    c = st.columns(1)
-    c[0].metric("Discounted Order %", pct(k["discount_penetration_pct"]))
-
-    # --- Payment Method Usage ---
+    # Discounted Order % + Payment Method Usage in one block
     pm_mix = k.get("payment_method_mix", {})
-    if pm_mix:
-        pm_sorted = sorted(pm_mix.items(), key=lambda x: x[1], reverse=True)
-        cols_per_row = 4
-        for i in range(0, len(pm_sorted), cols_per_row):
-            batch = pm_sorted[i:i + cols_per_row]
-            c = st.columns(cols_per_row)
-            for j, (method, pct_val) in enumerate(batch):
-                c[j].metric(method, pct(pct_val))
+    pm_sorted = sorted(pm_mix.items(), key=lambda x: x[1], reverse=True) if pm_mix else []
+    all_metrics = [("Discounted Order %", pct(k["discount_penetration_pct"]))] + [(m, pct(v)) for m, v in pm_sorted]
+    cols_per_row = 4
+    for i in range(0, len(all_metrics), cols_per_row):
+        batch = all_metrics[i:i + cols_per_row]
+        c = st.columns(cols_per_row)
+        for j, (label, val) in enumerate(batch):
+            c[j].metric(label, val)
 
     st.markdown("---")
 
