@@ -307,10 +307,11 @@ with tab_overview:
     c[2].metric("Rest Offer", bhd(kpi["rest_offer"]))
     c[3].metric("3PL Cost", bhd(kpi["cost_3pl"]))
 
-    c = st.columns(3)
+    c = st.columns(4)
     c[0].metric("Total Discount", bhd(kpi["total_discount"]))
     c[1].metric("Total KM", num(kpi["total_km"]))
     c[2].metric("Discounted Order %", pct(kpi["discount_order_pct"]))
+    c[3].metric("Take Rate", pct(kpi["take_rate_pct"]))
 
     st.markdown("---")
 
@@ -341,10 +342,9 @@ with tab_overview:
     c[1].metric("RPO", bhd(kpi["rpo"]))
     c[2].metric("RPO - CPO Spread", bhd(kpi["rpo_cpo_spread"]))
 
-    c = st.columns(3)
+    c = st.columns(2)
     c[0].metric("CPO Coverage", pct(kpi["cpo_coverage_pct"]))
     c[1].metric("Chargeable Delivery %", pct(kpi["chargeable_delivery_pct"]))
-    c[2].metric("Take Rate", pct(kpi["take_rate_pct"]))
 
     st.markdown("---")
 
