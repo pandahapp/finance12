@@ -317,34 +317,35 @@ with tab_overview:
 
     # ── PROFITABILITY KPIs ──
     st.markdown("##### Profitability")
-    c = st.columns(4)
+    c = st.columns(5)
     c[0].metric("Net Profit", bhd(kpi["profit"]))
     c[1].metric("Profit Margin", pct(kpi["profit_margin_pct"]))
-    c[2].metric("Loss Rate", pct(kpi["loss_rate_pct"]))
-    c[3].metric("Loss Amount", bhd(kpi["loss_amount"]))
+    c[2].metric("Profit / Order", bhd(kpi["profit_per_order"]))
+    c[3].metric("Loss Rate", pct(kpi["loss_rate_pct"]))
+    c[4].metric("Loss Amount", bhd(kpi["loss_amount"]))
 
     st.markdown("---")
 
     # ── UNIT ECONOMICS (per-order ratios) ──
     st.markdown("##### Unit Economics")
-    c = st.columns(4)
+    c = st.columns(3)
     c[0].metric("AOV", bhd(kpi["aov"]))
     c[1].metric("AOV Profitable", bhd(kpi["aov_profitable"]))
     c[2].metric("AOV Loss", bhd(kpi["aov_loss"]))
-    c[3].metric("Profit / Order", bhd(kpi["profit_per_order"]))
 
     st.markdown("---")
 
     # ── DELIVERY KPIs (delivered orders only) ──
     st.markdown("##### Delivery KPIs (delivered orders only)")
-    c = st.columns(3)
+    c = st.columns(4)
     c[0].metric("CPO (3PL)", bhd(kpi["cpo"]))
     c[1].metric("RPO", bhd(kpi["rpo"]))
     c[2].metric("RPO - CPO Spread", bhd(kpi["rpo_cpo_spread"]))
+    c[3].metric("CPO Coverage", pct(kpi["cpo_coverage_pct"]))
 
     c = st.columns(2)
-    c[0].metric("CPO Coverage", pct(kpi["cpo_coverage_pct"]))
-    c[1].metric("Chargeable Delivery %", pct(kpi["chargeable_delivery_pct"]))
+    c[0].metric("Chargeable Delivery %", pct(kpi["chargeable_delivery_pct"]))
+    c[1].metric("Break-even AOV", bhd(kpi["breakeven_order_value"]))
 
     st.markdown("---")
 
