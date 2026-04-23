@@ -788,16 +788,6 @@ with tab_profit:
         fig.update_layout(height=340, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Loss rate %", coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Distribution of profit per order
-    st.markdown("#### Distribution of profit per order")
-    fig = px.histogram(
-        filtered, x="order_profit", nbins=50,
-        color_discrete_sequence=["#C0232A"],
-    )
-    fig.add_vline(x=0, line_dash="dash", line_color="#1f2937", annotation_text="Breakeven")
-    fig.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=20), xaxis_title="Profit per order (BHD)", yaxis_title="Count")
-    st.plotly_chart(fig, use_container_width=True)
-
     # KM Delivery Charge Scenario
     st.markdown("---")
     st.markdown("#### 🎯 KM Delivery Charge Scenario")
