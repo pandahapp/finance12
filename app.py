@@ -801,10 +801,10 @@ with tab_profit:
     # KM Delivery Charge Scenario
     st.markdown("---")
     st.markdown("#### 🎯 KM Delivery Charge Scenario")
-    st.caption("Set delivery charge and free delivery % per KM. Free delivery % = subscribers who don't pay delivery fee.")
+    st.caption("Set delivery charge per KM and the % of orders that get free delivery (subscribers).")
 
     col_title, col_reset = st.columns([4, 1])
-    col_title.markdown("##### Delivery charge & free delivery % per KM")
+    col_title.markdown("##### Delivery charge per KM")
 
     # Get all unique KM values sorted
     km_values = sorted(filtered["km_billable"].unique())
@@ -814,48 +814,48 @@ with tab_profit:
 
     total_orders = len(filtered)
 
-    # Calculate current avg delivery fee, order count, and current free % per KM
+    # Calculate current avg delivery fee and order count per KM
     km_avg = {}
     km_counts = {}
-    km_free_pct = {}
     for km in km_values:
         sub = filtered[filtered["km_billable"] == km]
         km_counts[km] = len(sub)
         if len(sub) > 0:
             km_avg[km] = round(sub["delivery_fee_charged"].mean(), 3)
-            km_free_pct[km] = round((sub["delivery_fee_charged"] == 0).sum() / len(sub) * 100, 1)
         else:
             km_avg[km] = 0.0
-            km_free_pct[km] = 0.0
+
+    # Current free delivery %
+    current_free_total = (filtered["delivery_fee_charged"] == 0).sum()
+    current_free_pct = round(current_free_total / total_orders * 100, 1) if total_orders else 0.0
 
     # Reset button
     if "km_overrides" not in st.session_state:
         st.session_state.km_overrides = {}
-    if "km_free_overrides" not in st.session_state:
-        st.session_state.km_free_overrides = {}
-    if col_reset.button("Reset KM", use_container_width=True, key="reset_km"):
+    if col_reset.button("Reset", use_container_width=True, key="reset_km"):
         st.session_state.km_overrides = {}
-        st.session_state.km_free_overrides = {}
+        if "free_delivery_pct" in st.session_state:
+            del st.session_state["free_delivery_pct"]
         st.rerun()
 
-    # Show inputs: delivery charge + free delivery % per KM
+    # Single free delivery % input
+    free_del_pct = st.number_input(
+        f"Free delivery % of total orders (current: {current_free_pct}%)",
+        min_value=0.0, max_value=100.0, value=current_free_pct, step=1.0, format="%.1f",
+        help="% of ALL orders that get free delivery (e.g. subscribers). Applied equally across all KMs."
+    )
+
+    # KM charge inputs
     km_override = {}
-    km_free_override = {}
     for i in range(0, len(km_values), 6):
         batch = km_values[i:i + 6]
-
-        # Row 1: KM labels with order info
         bc = st.columns(6)
         for j, km in enumerate(batch):
             pct_of_total = (km_counts[km] / total_orders * 100) if total_orders else 0
-            bc[j].caption(f"**{km} KM** · {km_counts[km]:,} orders ({pct_of_total:.1f}%)")
-
-        # Row 2: Delivery charge inputs
-        bc2 = st.columns(6)
-        for j, km in enumerate(batch):
+            bc[j].caption(f"**{km} KM** · {km_counts[km]:,} ({pct_of_total:.1f}%) · avg {km_avg[km]:.3f}")
             current_val = st.session_state.km_overrides.get(km, km_avg[km])
-            new_val = bc2[j].number_input(
-                f"Fee {km}KM", min_value=0.0, max_value=10.0, value=current_val, step=0.050, format="%.3f",
+            new_val = bc[j].number_input(
+                f"{km} KM", min_value=0.0, max_value=10.0, value=current_val, step=0.050, format="%.3f",
                 label_visibility="collapsed"
             )
             km_override[km] = new_val
@@ -864,33 +864,16 @@ with tab_profit:
             elif km in st.session_state.km_overrides:
                 del st.session_state.km_overrides[km]
 
-        # Row 3: Free delivery % inputs
-        bc3 = st.columns(6)
-        for j, km in enumerate(batch):
-            current_free = st.session_state.km_free_overrides.get(km, km_free_pct[km])
-            new_free = bc3[j].number_input(
-                f"Free % {km}KM", min_value=0.0, max_value=100.0, value=current_free, step=1.0, format="%.1f",
-                help=f"% of orders with free delivery at {km} KM"
-            )
-            km_free_override[km] = new_free
-            if new_free != km_free_pct[km]:
-                st.session_state.km_free_overrides[km] = new_free
-            elif km in st.session_state.km_free_overrides:
-                del st.session_state.km_free_overrides[km]
-
     # --- Calculate scenario ---
-    # For each order: if within the free %, delivery fee = 0; otherwise = km_override
+    free_ratio = free_del_pct / 100
     scen_delivery_fees = []
     for km in km_values:
-        sub_mask = filtered["km_billable"] == km
-        sub = filtered[sub_mask]
+        sub = filtered[filtered["km_billable"] == km]
         n = len(sub)
         if n == 0:
             continue
-        free_pct = km_free_override.get(km, 0) / 100
-        n_free = int(round(n * free_pct))
+        n_free = int(round(n * free_ratio))
         n_paid = n - n_free
-        # Create fee series: first n_free get 0, rest get the override fee
         fees = pd.Series([0.0] * n_free + [km_override.get(km, km_avg[km])] * n_paid, index=sub.index)
         scen_delivery_fees.append(fees)
 
@@ -900,7 +883,6 @@ with tab_profit:
         scen_delivery_fee = filtered["delivery_fee_charged"]
 
     scen_delivery_rev = scen_delivery_fee * 1.10
-
     scen_profit = (
         filtered["commission_bhd"]
         + scen_delivery_rev
@@ -914,13 +896,18 @@ with tab_profit:
 
     # --- Results ---
     st.markdown("##### Scenario results")
+    n_free_total = int(round(total_orders * free_ratio))
+    n_paid_total = total_orders - n_free_total
+
+    sc = st.columns(4)
+    sc[0].metric("Total Orders", num(total_orders))
+    sc[1].metric("Free Delivery Orders", num(n_free_total), delta=f"{free_del_pct:.1f}%")
+    sc[2].metric("Paid Delivery Orders", num(n_paid_total))
+    sc[3].metric("", "")
+
     sc = st.columns(4)
     sc[0].metric("Baseline Profit", bhd(kpi["profit"]))
-    sc[1].metric(
-        "Scenario Profit",
-        bhd(scen_total),
-        delta=bhd(scen_total - kpi["profit"]),
-    )
+    sc[1].metric("Scenario Profit", bhd(scen_total), delta=bhd(scen_total - kpi["profit"]))
     sc[2].metric("Scenario Margin", pct(scen_margin), delta=f"{scen_margin - kpi['profit_margin_pct']:+.1f}pp")
     sc[3].metric("Scenario Loss Rate", pct(scen_loss), delta=f"{scen_loss - kpi['loss_rate_pct']:+.1f}pp")
 
@@ -933,22 +920,19 @@ with tab_profit:
         if n == 0:
             continue
         pct_total = round(n / total_orders * 100, 1)
-        free_pct = km_free_override.get(km, 0)
-        n_free = int(round(n * free_pct / 100))
+        n_free = int(round(n * free_ratio))
         n_paid = n - n_free
         base_profit = sub["order_profit"].sum()
-        # Scenario: n_free orders get 0 fee, n_paid get override fee
         paid_rev = n_paid * km_override.get(km, km_avg[km]) * 1.10
-        s_prof = (sub["commission_bhd"].sum() + paid_rev + sub["restaurant_delivery_offer"].sum() - sub["cost_3pl"].sum())
+        s_prof = sub["commission_bhd"].sum() + paid_rev + sub["restaurant_delivery_offer"].sum() - sub["cost_3pl"].sum()
         km_rows.append({
             "KM": km,
             "Orders": n,
             "% of Total": f"{pct_total}%",
+            "Free": n_free,
+            "Paid": n_paid,
             "Current Avg Fee": km_avg.get(km, 0),
             "Scenario Fee": km_override.get(km, km_avg[km]),
-            "Free Delivery %": f"{free_pct}%",
-            "Free Orders": n_free,
-            "Paid Orders": n_paid,
             "Baseline Profit": round(base_profit, 3),
             "Scenario Profit": round(s_prof, 3),
             "Difference": round(s_prof - base_profit, 3),
