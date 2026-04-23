@@ -831,16 +831,18 @@ with tab_profit:
         else:
             km_avg[km] = 0.0
 
-    # Show inputs in rows of 6 with % of total orders as label
+    # Show inputs in rows of 6 with order info and avg as label
     km_override = {}
     for i in range(0, len(km_values), 6):
         batch = km_values[i:i + 6]
         bc = st.columns(6)
         for j, km in enumerate(batch):
             pct_of_total = (km_counts[km] / total_orders * 100) if total_orders else 0
-            bc[j].caption(f"{km_counts[km]:,} orders ({pct_of_total:.1f}%)")
+            bc[j].caption(f"{km_counts[km]:,} orders ({pct_of_total:.1f}%) · avg {km_avg[km]:.3f}")
+            # Use session state value if set, otherwise default to avg
+            default_val = st.session_state.get(f"km_{km}", km_avg[km])
             km_override[km] = bc[j].number_input(
-                f"{km} KM", min_value=0.0, max_value=10.0, value=km_avg[km], step=0.050, format="%.3f", key=f"km_{km}"
+                f"{km} KM", min_value=0.0, max_value=10.0, value=default_val, step=0.050, format="%.3f", key=f"km_{km}"
             )
 
     # --- Calculate scenario ---
