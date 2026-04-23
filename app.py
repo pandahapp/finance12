@@ -801,17 +801,10 @@ with tab_profit:
     # Scenario sensitivity
     st.markdown("---")
     st.markdown("#### 🎯 Scenario sensitivity")
-    st.caption("Simulate profit impact of changes to take rate, delivery fee, 3PL cost, and delivery charge per KM bracket.")
-
-    # --- Take Rate & Cost sliders ---
-    s1, s2, s3 = st.columns(3)
-    take_rate_change = s1.slider("Change take rate (pp)", -10.0, 10.0, 0.0, 0.5, help="Add/subtract percentage points to current commission rate")
-    delivery_bump = s2.slider("Change delivery fee %", -50, 100, 0, 5)
-    cost_change = s3.slider("Change 3PL cost %", -50, 100, 0, 5)
+    st.caption("Set delivery charge per KM to simulate profit impact.")
 
     # --- Per-KM delivery charge ---
     st.markdown("##### Delivery charge per KM")
-    st.caption("Set the delivery charge (BHD) for each KM. Default = current average per KM.")
 
     # Get all unique KM values sorted
     km_values = sorted(filtered["km_billable"].unique())
@@ -819,44 +812,43 @@ with tab_profit:
     if len(km_values) == 0:
         km_values = list(range(0, 11))
 
-    # Calculate current avg delivery fee per KM
+    total_orders = len(filtered)
+
+    # Calculate current avg delivery fee and order count per KM
     km_avg = {}
+    km_counts = {}
     for km in km_values:
         sub = filtered[filtered["km_billable"] == km]
+        km_counts[km] = len(sub)
         if len(sub) > 0:
             km_avg[km] = round(sub["delivery_fee_charged"].mean(), 3)
         else:
             km_avg[km] = 0.0
 
-    # Show inputs in rows of 6
+    # Show inputs in rows of 6 with % of total orders as label
     km_override = {}
     for i in range(0, len(km_values), 6):
         batch = km_values[i:i + 6]
         bc = st.columns(6)
         for j, km in enumerate(batch):
+            pct_of_total = (km_counts[km] / total_orders * 100) if total_orders else 0
+            bc[j].caption(f"{km_counts[km]:,} orders ({pct_of_total:.1f}%)")
             km_override[km] = bc[j].number_input(
                 f"{km} KM", min_value=0.0, max_value=10.0, value=km_avg[km], step=0.050, format="%.3f", key=f"km_{km}"
             )
 
     # --- Calculate scenario ---
-    # New commission from take rate change
-    scen_commission = filtered["total_with_vat_delivery"] * ((filtered["commission_pct"] + take_rate_change) / 100)
-
-    # New delivery fee per order based on KM overrides
     scen_delivery_fee = filtered["km_billable"].map(km_override).fillna(filtered["delivery_fee_charged"])
-    # Apply delivery bump % on top
-    scen_delivery_fee = scen_delivery_fee * (1 + delivery_bump / 100)
     scen_delivery_rev = scen_delivery_fee * 1.10
 
-    scen_3pl = filtered["cost_3pl"] * (1 + cost_change / 100)
     scen_profit = (
-        scen_commission
+        filtered["commission_bhd"]
         + scen_delivery_rev
         + filtered["restaurant_delivery_offer"]
-        - scen_3pl
+        - filtered["cost_3pl"]
     )
     scen_total = scen_profit.sum()
-    scen_loss = (scen_profit <= 0).sum() / len(filtered) * 100
+    scen_loss = (scen_profit <= 0).sum() / total_orders * 100
     scen_gmv = filtered["total_with_vat_delivery"].sum()
     scen_margin = (scen_total / scen_gmv * 100) if scen_gmv else 0
 
@@ -880,17 +872,16 @@ with tab_profit:
         n = len(sub)
         if n == 0:
             continue
+        pct_total = round(n / total_orders * 100, 1)
         base_profit = sub["order_profit"].sum()
-        s_comm = sub["total_with_vat_delivery"] * ((sub["commission_pct"] + take_rate_change) / 100)
-        s_del_fee = sub["km_billable"].map(km_override).fillna(sub["delivery_fee_charged"]) * (1 + delivery_bump / 100)
-        s_del = s_del_fee * 1.10
-        s_3pl = sub["cost_3pl"] * (1 + cost_change / 100)
-        s_prof = (s_comm + s_del + sub["restaurant_delivery_offer"] - s_3pl).sum()
+        s_del = sub["km_billable"].map(km_override).fillna(sub["delivery_fee_charged"]) * 1.10
+        s_prof = (sub["commission_bhd"] + s_del + sub["restaurant_delivery_offer"] - sub["cost_3pl"]).sum()
         km_rows.append({
             "KM": km,
             "Orders": n,
-            "Avg Delivery Fee (Current)": round(km_avg.get(km, 0), 3),
-            "Delivery Charge (Scenario)": km_override[km],
+            "% of Total": f"{pct_total}%",
+            "Current Avg Fee": round(km_avg.get(km, 0), 3),
+            "Scenario Fee": km_override[km],
             "Baseline Profit": round(base_profit, 3),
             "Scenario Profit": round(s_prof, 3),
             "Difference": round(s_prof - base_profit, 3),
