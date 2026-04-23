@@ -809,33 +809,41 @@ with tab_profit:
     delivery_bump = s2.slider("Change delivery fee %", -50, 100, 0, 5)
     cost_change = s3.slider("Change 3PL cost %", -50, 100, 0, 5)
 
-    # --- Per-KM bracket delivery charge ---
-    st.markdown("##### Delivery charge per KM bracket")
-    st.caption("Set the delivery charge (BHD) for each distance bracket. Default = current average per bracket.")
+    # --- Per-KM delivery charge ---
+    st.markdown("##### Delivery charge per KM")
+    st.caption("Set the delivery charge (BHD) for each KM. Default = current average per KM.")
 
-    brackets = ["0-1km", "1-2km", "2-3km", "3-4km", "4-5km", "5km+"]
-    # Calculate current avg delivery fee per bracket
-    bracket_avg = {}
-    for b in brackets:
-        sub = filtered[filtered["distance_bracket"] == b]
+    # Get all unique KM values sorted
+    km_values = sorted(filtered["km_billable"].unique())
+    km_values = [k for k in km_values if k >= 0]
+    if len(km_values) == 0:
+        km_values = list(range(0, 11))
+
+    # Calculate current avg delivery fee per KM
+    km_avg = {}
+    for km in km_values:
+        sub = filtered[filtered["km_billable"] == km]
         if len(sub) > 0:
-            bracket_avg[b] = round(sub["delivery_fee_charged"].mean(), 3)
+            km_avg[km] = round(sub["delivery_fee_charged"].mean(), 3)
         else:
-            bracket_avg[b] = 0.0
+            km_avg[km] = 0.0
 
-    bc = st.columns(6)
-    bracket_override = {}
-    for i, b in enumerate(brackets):
-        bracket_override[b] = bc[i].number_input(
-            b, min_value=0.0, max_value=5.0, value=bracket_avg[b], step=0.050, format="%.3f"
-        )
+    # Show inputs in rows of 6
+    km_override = {}
+    for i in range(0, len(km_values), 6):
+        batch = km_values[i:i + 6]
+        bc = st.columns(6)
+        for j, km in enumerate(batch):
+            km_override[km] = bc[j].number_input(
+                f"{km} KM", min_value=0.0, max_value=10.0, value=km_avg[km], step=0.050, format="%.3f", key=f"km_{km}"
+            )
 
     # --- Calculate scenario ---
     # New commission from take rate change
     scen_commission = filtered["total_with_vat_delivery"] * ((filtered["commission_pct"] + take_rate_change) / 100)
 
-    # New delivery fee per order based on bracket overrides
-    scen_delivery_fee = filtered["distance_bracket"].map(bracket_override).fillna(filtered["delivery_fee_charged"])
+    # New delivery fee per order based on KM overrides
+    scen_delivery_fee = filtered["km_billable"].map(km_override).fillna(filtered["delivery_fee_charged"])
     # Apply delivery bump % on top
     scen_delivery_fee = scen_delivery_fee * (1 + delivery_bump / 100)
     scen_delivery_rev = scen_delivery_fee * 1.10
@@ -864,29 +872,31 @@ with tab_profit:
     sc[2].metric("Scenario Margin", pct(scen_margin), delta=f"{scen_margin - kpi['profit_margin_pct']:+.1f}pp")
     sc[3].metric("Scenario Loss Rate", pct(scen_loss), delta=f"{scen_loss - kpi['loss_rate_pct']:+.1f}pp")
 
-    # Breakdown per bracket
-    st.markdown("##### Impact per bracket")
-    bracket_rows = []
-    for b in brackets:
-        sub = filtered[filtered["distance_bracket"] == b]
+    # Breakdown per KM
+    st.markdown("##### Impact per KM")
+    km_rows = []
+    for km in km_values:
+        sub = filtered[filtered["km_billable"] == km]
         n = len(sub)
         if n == 0:
             continue
         base_profit = sub["order_profit"].sum()
         s_comm = sub["total_with_vat_delivery"] * ((sub["commission_pct"] + take_rate_change) / 100)
-        s_del = sub["distance_bracket"].map(bracket_override).fillna(sub["delivery_fee_charged"]) * (1 + delivery_bump / 100) * 1.10
+        s_del_fee = sub["km_billable"].map(km_override).fillna(sub["delivery_fee_charged"]) * (1 + delivery_bump / 100)
+        s_del = s_del_fee * 1.10
         s_3pl = sub["cost_3pl"] * (1 + cost_change / 100)
         s_prof = (s_comm + s_del + sub["restaurant_delivery_offer"] - s_3pl).sum()
-        bracket_rows.append({
-            "Bracket": b,
+        km_rows.append({
+            "KM": km,
             "Orders": n,
-            "Delivery Charge": bracket_override[b],
+            "Avg Delivery Fee (Current)": round(km_avg.get(km, 0), 3),
+            "Delivery Charge (Scenario)": km_override[km],
             "Baseline Profit": round(base_profit, 3),
             "Scenario Profit": round(s_prof, 3),
             "Difference": round(s_prof - base_profit, 3),
         })
-    if bracket_rows:
-        st.dataframe(pd.DataFrame(bracket_rows), use_container_width=True, hide_index=True)
+    if km_rows:
+        st.dataframe(pd.DataFrame(km_rows), use_container_width=True, hide_index=True)
 
 # ============ TIME ANALYSIS ============
 with tab_time:
