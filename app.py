@@ -834,6 +834,7 @@ with tab_profit:
         st.session_state.km_overrides = {}
     if col_reset.button("Reset", use_container_width=True, key="reset_km"):
         st.session_state.km_overrides = {}
+        st.session_state.km_calculated = False
         if "free_delivery_pct" in st.session_state:
             del st.session_state["free_delivery_pct"]
         st.rerun()
@@ -864,81 +865,85 @@ with tab_profit:
             elif km in st.session_state.km_overrides:
                 del st.session_state.km_overrides[km]
 
-    # --- Calculate scenario ---
-    free_ratio = free_del_pct / 100
-    scen_delivery_fees = []
-    for km in km_values:
-        sub = filtered[filtered["km_billable"] == km]
-        n = len(sub)
-        if n == 0:
-            continue
-        n_free = int(round(n * free_ratio))
-        n_paid = n - n_free
-        fees = pd.Series([0.0] * n_free + [km_override.get(km, km_avg[km])] * n_paid, index=sub.index)
-        scen_delivery_fees.append(fees)
+    # --- Calculate button ---
+    if st.button("Calculate Scenario", type="primary", use_container_width=True):
+        st.session_state.km_calculated = True
 
-    if scen_delivery_fees:
-        scen_delivery_fee = pd.concat(scen_delivery_fees).reindex(filtered.index, fill_value=0)
-    else:
-        scen_delivery_fee = filtered["delivery_fee_charged"]
+    if st.session_state.get("km_calculated"):
+        free_ratio = free_del_pct / 100
+        scen_delivery_fees = []
+        for km in km_values:
+            sub = filtered[filtered["km_billable"] == km]
+            n = len(sub)
+            if n == 0:
+                continue
+            n_free = int(round(n * free_ratio))
+            n_paid = n - n_free
+            fees = pd.Series([0.0] * n_free + [km_override.get(km, km_avg[km])] * n_paid, index=sub.index)
+            scen_delivery_fees.append(fees)
 
-    scen_delivery_rev = scen_delivery_fee * 1.10
-    scen_profit = (
-        filtered["commission_bhd"]
-        + scen_delivery_rev
-        + filtered["restaurant_delivery_offer"]
-        - filtered["cost_3pl"]
-    )
-    scen_total = scen_profit.sum()
-    scen_loss = (scen_profit <= 0).sum() / total_orders * 100
-    scen_gmv = filtered["total_with_vat_delivery"].sum()
-    scen_margin = (scen_total / scen_gmv * 100) if scen_gmv else 0
+        if scen_delivery_fees:
+            scen_delivery_fee = pd.concat(scen_delivery_fees).reindex(filtered.index, fill_value=0)
+        else:
+            scen_delivery_fee = filtered["delivery_fee_charged"]
 
-    # --- Results ---
-    st.markdown("##### Scenario results")
-    n_free_total = int(round(total_orders * free_ratio))
-    n_paid_total = total_orders - n_free_total
+        scen_delivery_rev = scen_delivery_fee * 1.10
+        scen_profit = (
+            filtered["commission_bhd"]
+            + scen_delivery_rev
+            + filtered["restaurant_delivery_offer"]
+            - filtered["cost_3pl"]
+        )
+        scen_total = scen_profit.sum()
+        scen_loss = (scen_profit <= 0).sum() / total_orders * 100
+        scen_gmv = filtered["total_with_vat_delivery"].sum()
+        scen_margin = (scen_total / scen_gmv * 100) if scen_gmv else 0
 
-    sc = st.columns(4)
-    sc[0].metric("Total Orders", num(total_orders))
-    sc[1].metric("Free Delivery Orders", num(n_free_total), delta=f"{free_del_pct:.1f}%")
-    sc[2].metric("Paid Delivery Orders", num(n_paid_total))
-    sc[3].metric("", "")
+        # --- Results ---
+        st.markdown("##### Scenario results")
+        n_free_total = int(round(total_orders * free_ratio))
+        n_paid_total = total_orders - n_free_total
 
-    sc = st.columns(4)
-    sc[0].metric("Baseline Profit", bhd(kpi["profit"]))
-    sc[1].metric("Scenario Profit", bhd(scen_total), delta=bhd(scen_total - kpi["profit"]))
-    sc[2].metric("Scenario Margin", pct(scen_margin), delta=f"{scen_margin - kpi['profit_margin_pct']:+.1f}pp")
-    sc[3].metric("Scenario Loss Rate", pct(scen_loss), delta=f"{scen_loss - kpi['loss_rate_pct']:+.1f}pp")
+        sc = st.columns(4)
+        sc[0].metric("Total Orders", num(total_orders))
+        sc[1].metric("Free Delivery Orders", num(n_free_total), delta=f"{free_del_pct:.1f}%")
+        sc[2].metric("Paid Delivery Orders", num(n_paid_total))
+        sc[3].metric("", "")
 
-    # Breakdown per KM
-    st.markdown("##### Impact per KM")
-    km_rows = []
-    for km in km_values:
-        sub = filtered[filtered["km_billable"] == km]
-        n = len(sub)
-        if n == 0:
-            continue
-        pct_total = round(n / total_orders * 100, 1)
-        n_free = int(round(n * free_ratio))
-        n_paid = n - n_free
-        base_profit = sub["order_profit"].sum()
-        paid_rev = n_paid * km_override.get(km, km_avg[km]) * 1.10
-        s_prof = sub["commission_bhd"].sum() + paid_rev + sub["restaurant_delivery_offer"].sum() - sub["cost_3pl"].sum()
-        km_rows.append({
-            "KM": km,
-            "Orders": n,
-            "% of Total": f"{pct_total}%",
-            "Free": n_free,
-            "Paid": n_paid,
-            "Current Avg Fee": km_avg.get(km, 0),
-            "Scenario Fee": km_override.get(km, km_avg[km]),
-            "Baseline Profit": round(base_profit, 3),
-            "Scenario Profit": round(s_prof, 3),
-            "Difference": round(s_prof - base_profit, 3),
-        })
-    if km_rows:
-        st.dataframe(pd.DataFrame(km_rows), use_container_width=True, hide_index=True)
+        sc = st.columns(4)
+        sc[0].metric("Baseline Profit", bhd(kpi["profit"]))
+        sc[1].metric("Scenario Profit", bhd(scen_total), delta=bhd(scen_total - kpi["profit"]))
+        sc[2].metric("Scenario Margin", pct(scen_margin), delta=f"{scen_margin - kpi['profit_margin_pct']:+.1f}pp")
+        sc[3].metric("Scenario Loss Rate", pct(scen_loss), delta=f"{scen_loss - kpi['loss_rate_pct']:+.1f}pp")
+
+        # Breakdown per KM
+        st.markdown("##### Impact per KM")
+        km_rows = []
+        for km in km_values:
+            sub = filtered[filtered["km_billable"] == km]
+            n = len(sub)
+            if n == 0:
+                continue
+            pct_total = round(n / total_orders * 100, 1)
+            n_free = int(round(n * free_ratio))
+            n_paid = n - n_free
+            base_profit = sub["order_profit"].sum()
+            paid_rev = n_paid * km_override.get(km, km_avg[km]) * 1.10
+            s_prof = sub["commission_bhd"].sum() + paid_rev + sub["restaurant_delivery_offer"].sum() - sub["cost_3pl"].sum()
+            km_rows.append({
+                "KM": km,
+                "Orders": n,
+                "% of Total": f"{pct_total}%",
+                "Free": n_free,
+                "Paid": n_paid,
+                "Current Avg Fee": km_avg.get(km, 0),
+                "Scenario Fee": km_override.get(km, km_avg[km]),
+                "Baseline Profit": round(base_profit, 3),
+                "Scenario Profit": round(s_prof, 3),
+                "Difference": round(s_prof - base_profit, 3),
+            })
+        if km_rows:
+            st.dataframe(pd.DataFrame(km_rows), use_container_width=True, hide_index=True)
 
     # ── TAKE RATE SCENARIO ──
     st.markdown("---")
