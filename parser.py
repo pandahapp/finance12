@@ -3,8 +3,35 @@ Excel parser & enrichment.
 Maps columns: I, J, K, M, N, O, P, Q, R, S, T, U, Y, Z, AB, AC, AD, AF, AK
 Computes: delivery_revenue (T*1.10), km_billable (ceil), order_profit, bracket, daypart.
 """
+import os
 import numpy as np
 import pandas as pd
+
+VERTICALS_CSV = os.path.join(os.path.dirname(__file__), "data", "verticals.csv")
+DEFAULT_VERTICAL = "restaurant"
+
+
+def _load_verticals() -> dict:
+    """Load restaurant_id -> vertical mapping. Returns empty dict if file missing."""
+    if not os.path.exists(VERTICALS_CSV):
+        return {}
+    try:
+        v = pd.read_csv(VERTICALS_CSV, dtype={"restaurant_id": str})
+        v["restaurant_id"] = v["restaurant_id"].astype(str).str.strip()
+        v["vertical"] = v["vertical"].astype(str).str.strip().str.lower()
+        return dict(zip(v["restaurant_id"], v["vertical"]))
+    except Exception:
+        return {}
+
+
+def apply_verticals(df: pd.DataFrame) -> pd.DataFrame:
+    """Tag each row with a `vertical` column based on restaurant_id."""
+    if "restaurant_id" not in df.columns or len(df) == 0:
+        df["vertical"] = DEFAULT_VERTICAL
+        return df
+    vmap = _load_verticals()
+    df["vertical"] = df["restaurant_id"].astype(str).str.strip().map(vmap).fillna(DEFAULT_VERTICAL)
+    return df
 
 # Excel column letter -> 0-based index
 COL = {
@@ -51,9 +78,9 @@ STRING_FIELDS = [
 ]
 
 # Exclude driver IDs — virtual drivers, not real orders, remove entirely
-EXCLUDE_DRIVER_IDS = {"18"}
+EXCLUDE_DRIVER_IDS = set()
 # No-delivery driver IDs — real orders but no delivery (e.g. charities, pickup)
-NO_DELIVERY_DRIVER_IDS = {"1", "17"}
+NO_DELIVERY_DRIVER_IDS = {"1", "17", "18"}
 
 
 def _bracket(km: float) -> str:
@@ -184,5 +211,8 @@ def parse_excel(file) -> pd.DataFrame:
         df["restaurant_name"],
         np.where(df["restaurant_id"].str.len() > 0, df["restaurant_id"], "Unassigned"),
     )
+
+    # Vertical classification from data/verticals.csv (fallback = "restaurant")
+    df = apply_verticals(df)
 
     return df

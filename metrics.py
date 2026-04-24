@@ -41,6 +41,8 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         out = out[out["distance_bracket"].isin(filters["distance_brackets"])]
     if filters.get("restaurants"):
         out = out[out["restaurant_display"].isin(filters["restaurants"])]
+    if filters.get("verticals"):
+        out = out[out["vertical"].isin(filters["verticals"])]
     if filters.get("order_id"):
         out = out[out["order_id"].astype(str).str.contains(filters["order_id"], case=False, na=False)]
     if filters.get("user_id"):
@@ -66,6 +68,7 @@ def top_line(df: pd.DataFrame) -> dict:
         "take_rate_pct", "gross_revenue",
         "cpo_coverage_pct", "chargeable_delivery_pct",
         "breakeven_order_value", "discount_order_pct",
+        "avg_commission_per_order", "avg_delivered_per_day",
     ]
     if len(df) == 0:
         return {k: 0 for k in _zero_keys}
@@ -78,7 +81,9 @@ def top_line(df: pd.DataFrame) -> dict:
     gmv = df["total_with_vat_delivery"].sum()
     net_food = df["amount_ex_vat"].sum()
     commission = df["commission_bhd"].sum()
-    delivery_rev = delivered["delivery_revenue"].sum()
+    # Delivery revenue across ALL orders (no-delivery orders have 0 fee, so no impact).
+    # Gross Revenue = Commission + (Delivery Rev × 1.10) + Rest Offer — all over all orders.
+    delivery_rev = df["delivery_revenue"].sum()
     rest_offer = df["restaurant_delivery_offer"].sum()
     cost_3pl = delivered["cost_3pl"].sum()
     profit = commission + delivery_rev + rest_offer - cost_3pl
@@ -108,6 +113,11 @@ def top_line(df: pd.DataFrame) -> dict:
     cpo = cost_3pl / nd if nd else 0
     rpo = (delivery_rev + rest_offer) / nd if nd else 0
     cpo_coverage_pct = (rpo / cpo * 100) if cpo else 0
+
+    # Average commission per order (BHD/order) and avg delivered orders per day
+    avg_commission_per_order = commission / n if n else 0
+    unique_days = df["order_date"].dt.normalize().nunique() if "order_date" in df.columns else 0
+    avg_delivered_per_day = nd / unique_days if unique_days else 0
 
     return {
         "orders": n,
@@ -140,6 +150,8 @@ def top_line(df: pd.DataFrame) -> dict:
         "chargeable_delivery_pct": chargeable_delivery_pct,
         "breakeven_order_value": breakeven_ov,
         "discount_order_pct": discount_order_pct,
+        "avg_commission_per_order": avg_commission_per_order,
+        "avg_delivered_per_day": avg_delivered_per_day,
     }
 
 

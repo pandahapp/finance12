@@ -177,6 +177,10 @@ def load_all_orders() -> pd.DataFrame:
     for col in ["km_billable", "is_wallet", "is_discounted", "is_profitable", "is_delivered", "hour"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
+    # Re-apply vertical mapping (derived from restaurant_id, CSV-driven)
+    from parser import apply_verticals
+    df = apply_verticals(df)
+
     return df
 
 

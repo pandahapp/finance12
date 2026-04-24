@@ -245,6 +245,13 @@ with st.sidebar:
     bracket_opts = ["0-1km", "1-2km", "2-3km", "3-4km", "4-5km", "5km+"]
     bracket_sel = st.multiselect("Distance brackets", bracket_opts, default=[])
 
+    # Vertical (from data/verticals.csv mapping)
+    if "vertical" in df.columns:
+        vert_opts = sorted(df["vertical"].dropna().unique().tolist())
+        vert_sel = st.multiselect("Vertical", vert_opts, default=[], placeholder="All verticals")
+    else:
+        vert_sel = []
+
     # Restaurants
     rest_opts = sorted(df["restaurant_display"].unique().tolist())
     rest_sel = st.multiselect("Restaurants", rest_opts, default=[])
@@ -272,6 +279,7 @@ filters = {
     "payment_methods": payment_sel,
     "distance_brackets": bracket_sel,
     "restaurants": rest_sel,
+    "verticals": vert_sel,
     "only_profitable": prof_filter,
     "order_id": order_id_input.strip() if order_id_input.strip() else None,
     "user_id": user_id_input.strip() if user_id_input.strip() else None,
@@ -312,6 +320,10 @@ with tab_overview:
     c[1].metric("Total KM", num(kpi["total_km"]))
     c[2].metric("Discounted Order %", pct(kpi["discount_order_pct"]))
     c[3].metric("Take Rate", pct(kpi["take_rate_pct"]))
+
+    c = st.columns(4)
+    c[0].metric("Avg Delivered / Day", f"{kpi['avg_delivered_per_day']:,.1f}")
+    c[1].metric("Avg Commission / Order", bhd(kpi["avg_commission_per_order"]))
 
     st.markdown("---")
 
@@ -1191,7 +1203,7 @@ with tab_raw:
 # ============ RATIOS ============
 with tab_ratios:
     st.markdown("#### Ratio Definitions & Formulas")
-    st.caption("How each metric is calculated. D.Orders = Delivered Orders only (excludes virtual drivers 1, 17, 18 and orders with no driver).")
+    st.caption("How each metric is calculated. D.Orders = Delivered Orders only (excludes no-delivery drivers 1, 17, 18 — charities/pickup — and orders with no driver).")
 
     st.markdown("---")
 
@@ -1200,14 +1212,14 @@ with tab_ratios:
     st.markdown("""
 | Metric | Formula | Notes |
 |---|---|---|
-| **Total Orders** | `COUNT(all orders)` | Every row in the dataset |
-| **Delivered Orders** | `COUNT(orders WHERE driver NOT IN [empty, 1, 17, 18])` | Real driver assigned |
+| **Total Orders** | `COUNT(all orders)` | Every row in the dataset (incl. charities/pickup with drivers 1, 17, 18) |
+| **Delivered Orders** | `COUNT(orders WHERE driver NOT IN [empty, 1, 17, 18])` | Real delivery driver assigned |
 | **GMV** | `SUM(Column P)` | Customer payment for food incl. VAT & delivery |
 | **Commission** | `SUM(Column V)` | Commission in BHD |
-| **Delivery Rev x1.10** | `SUM(Column T × 1.10)` — D.Orders only | Delivery fee charged × 1.10, delivered orders only |
-| **Rest Offer** | `SUM(Column AB)` | Restaurant delivery offer subsidy |
+| **Delivery Rev x1.10** | `SUM(Column T × 1.10)` — all orders | Delivery fee charged × 1.10 (no-delivery orders contribute 0) |
+| **Rest Offer** | `SUM(Column AB)` | Restaurant delivery offer subsidy (all orders) |
 | **3PL Cost** | `SUM(Column AK)` — D.Orders only | Third-party logistics cost, delivered orders only |
-| **Gross Revenue** | `Commission + Delivery Rev + Rest Offer` | Total revenue before 3PL cost |
+| **Gross Revenue** | `Commission + (Delivery Rev × 1.10) + Rest Offer` | All orders (incl. drivers 1, 17, 18 — no-delivery still count for commission/rest offer) |
 | **Total Discount** | `SUM(Column AD)` | All discounts given |
 | **Total KM** | `SUM(CEIL(Column AF))` — D.Orders only | Each order's KM rounded up to whole number, delivered only |
 """)
@@ -1265,7 +1277,7 @@ with tab_ratios:
 | **Is Profitable** | `1 if Order Profit > 0, else 0` |
 | **KM Billable** | `CEIL(Column AF)` — rounded up to whole number |
 | **Distance Bracket** | `0-1km, 1-2km, 2-3km, 3-4km, 4-5km, 5km+` based on KM Billable |
-| **Is Delivered** | `1 if driver exists AND driver NOT IN [1, 17], else 0 (driver 18 removed entirely)` |
+| **Is Delivered** | `1 if driver exists AND driver NOT IN [1, 17, 18], else 0` (1/17/18 = charities/pickup, counted as orders but not deliveries) |
 """)
 
     st.markdown("---")
